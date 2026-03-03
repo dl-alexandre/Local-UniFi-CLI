@@ -1,0 +1,33 @@
+# Binaries
+unifi
+*.exe
+
+# Build artifacts
+dist/
+
+# Test artifacts
+*.test
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# Local config (user-specific)
+config.yml
+!config.example.yml
+
+# Temporary files
+*.tmp
+*.bak
