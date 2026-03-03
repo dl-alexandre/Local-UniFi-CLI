@@ -370,6 +370,7 @@ func (c *SiteStatsCmd) Run(g *Globals) error {
 type NetworksCmd struct {
 	List   ListNetworksCmd  `cmd:"" help:"List all networks/VLANs"`
 	Create CreateNetworkCmd `cmd:"" help:"Create a new network/VLAN"`
+	Enable EnableNetworkCmd `cmd:"" help:"Enable a network/VLAN"`
 }
 
 // ListNetworksCmd handles the networks list command
@@ -469,6 +470,56 @@ func (c *CreateNetworkCmd) Run(g *Globals) error {
 	}
 	fmt.Println("\nNote: You may need to configure port profiles on switches to use this VLAN.")
 
+	return nil
+}
+
+// EnableNetworkCmd handles enabling a network
+type EnableNetworkCmd struct {
+	Site      string `help:"Site ID (default: first available)" default:""`
+	NetworkID string `arg:"" help:"Network ID to enable"`
+}
+
+func (c *EnableNetworkCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	// Get current network to verify it exists and show status
+	networks, err := g.appClient.ListNetworks(siteID)
+	if err != nil {
+		return fmt.Errorf("failed to list networks: %w", err)
+	}
+
+	var targetNetwork *api.Network
+	for _, net := range networks.Data {
+		if net.ID == c.NetworkID {
+			targetNetwork = &net
+			break
+		}
+	}
+
+	if targetNetwork == nil {
+		return fmt.Errorf("network %s not found", c.NetworkID)
+	}
+
+	if targetNetwork.Enabled {
+		fmt.Printf("Network '%s' is already enabled\n", targetNetwork.Name)
+		return nil
+	}
+
+	// Call the API to enable it
+	fmt.Printf("Enabling network '%s' (%s)...\n", targetNetwork.Name, c.NetworkID)
+
+	if err := g.appClient.EnableNetwork(siteID, c.NetworkID); err != nil {
+		return fmt.Errorf("failed to enable network: %w", err)
+	}
+
+	fmt.Printf("✅ Network '%s' enabled successfully\n", targetNetwork.Name)
 	return nil
 }
 

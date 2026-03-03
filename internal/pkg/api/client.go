@@ -579,6 +579,110 @@ func (c *Client) CreateNetwork(siteID string, network *NetworkRequest) (*Network
 	return &result.Data, nil
 }
 
+// EnableNetwork enables a network by ID
+func (c *Client) EnableNetwork(siteID, networkID string) error {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return err
+		}
+	}
+
+	// First get the current network config
+	endpoint := fmt.Sprintf("/api/s/%s/rest/networkconf/%s", c.sitePath(siteID), networkID)
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to get network: %d", resp.StatusCode())
+	}
+
+	// Parse the network data
+	var networkData map[string]interface{}
+	if err := json.Unmarshal(resp.Body(), &networkData); err != nil {
+		return fmt.Errorf("failed to parse network data: %w", err)
+	}
+
+	// Extract the data array and get the network
+	data, ok := networkData["data"].([]interface{})
+	if !ok || len(data) == 0 {
+		return fmt.Errorf("network not found")
+	}
+
+	// Get the first network object
+	network := data[0].(map[string]interface{})
+
+	// Set enabled to true
+	network["enabled"] = true
+
+	// PUT the updated network back
+	putResp, err := c.httpClient.R().SetBody(network).Put(c.apiPath(endpoint))
+
+	if err != nil {
+		return &NetworkError{Message: err.Error()}
+	}
+
+	if putResp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to enable network: %d", putResp.StatusCode())
+	}
+
+	return nil
+}
+
+// DisableNetwork disables a network by ID
+func (c *Client) DisableNetwork(siteID, networkID string) error {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return err
+		}
+	}
+
+	// First get the current network config
+	endpoint := fmt.Sprintf("/api/s/%s/rest/networkconf/%s", c.sitePath(siteID), networkID)
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to get network: %d", resp.StatusCode())
+	}
+
+	// Parse the network data
+	var networkData map[string]interface{}
+	if err := json.Unmarshal(resp.Body(), &networkData); err != nil {
+		return fmt.Errorf("failed to parse network data: %w", err)
+	}
+
+	// Extract the data array and get the network
+	data, ok := networkData["data"].([]interface{})
+	if !ok || len(data) == 0 {
+		return fmt.Errorf("network not found")
+	}
+
+	// Get the first network object
+	network := data[0].(map[string]interface{})
+
+	// Set enabled to false
+	network["enabled"] = false
+
+	// PUT the updated network back
+	putResp, err := c.httpClient.R().SetBody(network).Put(c.apiPath(endpoint))
+
+	if err != nil {
+		return &NetworkError{Message: err.Error()}
+	}
+
+	if putResp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to disable network: %d", putResp.StatusCode())
+	}
+
+	return nil
+}
+
 // ListFirewallRules retrieves all firewall rules for a specific site
 func (c *Client) ListFirewallRules(siteID string) (*FirewallRulesResponse, error) {
 	if !c.loggedIn {
