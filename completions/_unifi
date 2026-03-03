@@ -1,0 +1,169 @@
+#compdef unifi
+
+# UniFi CLI Zsh Completion
+# Save to: unifi completion zsh > "${fpath[1]}/_unifi"
+# Or add to ~/.zshrc: source <(unifi completion zsh)
+
+_unifi() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+    
+    _arguments -C \
+        '(-h --help)'{-h,--help}'[Show help]' \
+        '(--base-url)--base-url=[Controller base URL]' \
+        '(--username)--username=[Username for authentication]' \
+        '(--password)--password=[Password for authentication]' \
+        '(--timeout)--timeout=[Request timeout in seconds]' \
+        '(--format)--format=[Output format]:format:(table json)' \
+        '(--color)--color=[Color mode]:color:(auto always never)' \
+        '(--no-headers)--no-headers[Disable table headers]' \
+        '(-v --verbose)'{-v,--verbose}'[Enable verbose output]' \
+        '(--debug)--debug[Enable debug output]' \
+        '(-c --config-file)'{-c,--config-file}'[Config file path]' \
+        '1: :->command' \
+        '*:: :->args'
+    
+    case "$state" in
+        command)
+            _values 'commands' \
+                'init[Interactive configuration setup]' \
+                'ping[Test connectivity to controller]' \
+                'sites[Manage sites]' \
+                'networks[Manage networks/VLANs]' \
+                'devices[Manage devices]' \
+                'clients[Manage clients]' \
+                'firewall[Manage firewall rules]' \
+                'settings[Manage controller settings]' \
+                'users[Manage local UniFi users]' \
+                'backups[Manage controller backups]' \
+                'firmware[Manage device firmware]' \
+                'port[Manage switch ports]' \
+                'hotspot[Manage hotspot guests]' \
+                'version[Show version information]' \
+                'completion[Generate shell completion scripts]'
+            ;;
+        args)
+            case "$line[1]" in
+                sites)
+                    _arguments \
+                        'list[List all sites]' \
+                        'stats[Show site health and statistics]' \
+                        '(--site)--site=[Site ID]' \
+                        '--help[Show help]'
+                    ;;
+                networks)
+                    _arguments \
+                        'list[List all networks]' \
+                        'create[Create a new network]' \
+                        '(--site)--site=[Site ID]' \
+                        '(--name)--name=[Network name]' \
+                        '(--vlan)--vlan=[VLAN ID]' \
+                        '(--subnet)--subnet=[IP subnet]' \
+                        '(--purpose)--purpose=[Network purpose]:purpose:(corporate guest vlan-only)' \
+                        '--help[Show help]'
+                    ;;
+                devices)
+                    _arguments \
+                        'list[List all devices]' \
+                        'adopt[Adopt a pending device]' \
+                        'provision[Provision a device]' \
+                        'restart[Restart a device]' \
+                        '(--site)--site=[Site ID]' \
+                        '--help[Show help]'
+                    ;;
+                clients)
+                    _arguments \
+                        'list[List connected clients]' \
+                        'block[Block a client by MAC address]' \
+                        'unblock[Unblock a client by MAC address]' \
+                        '(--site)--site=[Site ID]' \
+                        '--help[Show help]'
+                    ;;
+                firewall)
+                    _arguments \
+                        'list[List all firewall rules]' \
+                        'create[Create a new firewall rule]' \
+                        'enable[Enable a firewall rule]' \
+                        'disable[Disable a firewall rule]' \
+                        'delete[Delete a firewall rule]' \
+                        '(--site)--site=[Site ID]' \
+                        '(--name)--name=[Rule name]' \
+                        '(--action)--action=[Rule action]:action:(accept drop reject)' \
+                        '(--protocol)--protocol=[Protocol]:protocol:(all tcp udp icmp)' \
+                        '(--src-address)--src-address=[Source address]' \
+                        '(--dst-address)--dst-address=[Destination address]' \
+                        '(--dst-port)--dst-port=[Destination port]' \
+                        '(--ruleset)--ruleset=[Rule set]:ruleset:(WAN_IN WAN_OUT LAN_IN LAN_OUT GUEST_IN)' \
+                        '--help[Show help]'
+                    ;;
+                settings)
+                    _arguments \
+                        'list[List controller/site settings]' \
+                        'get[Get a specific setting value]' \
+                        '(--site)--site=[Site ID]' \
+                        '(--category)--category=[Filter by category]' \
+                        '--help[Show help]'
+                    ;;
+                users)
+                    _arguments \
+                        'list[List local UniFi users]' \
+                        'create[Create a new local user]' \
+                        'delete[Delete a local user]' \
+                        'set-password[Set password for a user]' \
+                        '(--name)--name=[Full name]' \
+                        '(--user)--user=[Username]' \
+                        '(--email)--email=[Email address]' \
+                        '(--user-password)--user-password=[Password for the user]' \
+                        '(--role)--role=[User role]:role:(admin readonly)' \
+                        '(--is-admin)--is-admin[Grant admin privileges]' \
+                        '(--force -f)'{-f,--force}'[Skip confirmation prompt]' \
+                        '(--new-password)--new-password=[New password]' \
+                        '--help[Show help]'
+                    ;;
+                backups)
+                    _arguments \
+                        'list[List available backups]' \
+                        'create[Create a manual backup]' \
+                        'download[Download a backup file]' \
+                        'restore[Restore from a backup]' \
+                        '(--encrypt)--encrypt[Encrypt the backup]' \
+                        '(--output -o)'{-o,--output}'[Output file path]' \
+                        '(--force -f)'{-f,--force}'[Skip confirmation prompt]' \
+                        '--help[Show help]'
+                    ;;
+                firmware)
+                    _arguments \
+                        'list[List firmware status for all devices]' \
+                        'upgrade[Upgrade firmware for a device]' \
+                        '(--version)--version=[Specific firmware version to upgrade to]' \
+                        '--help[Show help]'
+                    ;;
+                port)
+                    _arguments \
+                        'list[List switch ports with status]' \
+                        'set[Configure port settings]' \
+                        '(--device)--device=[Filter by device (MAC or ID)]' \
+                        '(--profile)--profile=[Port profile ID to assign]' \
+                        '(--poe)--poe=[PoE mode]:mode:(auto passthrough off)' \
+                        '(--enable)--enable[Enable the port]' \
+                        '(--disable)--disable[Disable the port]' \
+                        '--help[Show help]'
+                    ;;
+                hotspot)
+                    _arguments \
+                        'list[List hotspot guests]' \
+                        'authorize[Authorize a guest]' \
+                        'unauthorize[Unauthorize a guest]' \
+                        'kick[Kick a guest from the network]' \
+                        '(--duration)--duration=[Authorization duration in minutes]' \
+                        '--help[Show help]'
+                    ;;
+                completion)
+                    _values 'shell' 'bash' 'zsh' 'fish'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+compdef _unifi unifi

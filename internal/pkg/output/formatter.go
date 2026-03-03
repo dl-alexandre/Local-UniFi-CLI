@@ -83,6 +83,69 @@ func (f *Formatter) PrintSitesTable(sites []SiteData) {
 	}
 }
 
+// NetworkData holds network information for table output
+type NetworkData struct {
+	ID      string
+	Name    string
+	Purpose string
+	VLAN    int
+	Subnet  string
+	Enabled bool
+	IsGuest bool
+}
+
+// PrintNetworksTable outputs networks in table format
+func (f *Formatter) PrintNetworksTable(networks []NetworkData) {
+	if len(networks) == 0 {
+		fmt.Println("No networks found.")
+		return
+	}
+
+	tbl := table.New("ID", "Name", "Purpose", "VLAN", "Subnet", "Enabled").WithWriter(os.Stdout)
+
+	if f.Color && !f.NoHeaders {
+		tbl.WithHeaderFormatter(func(format string, vals ...interface{}) string {
+			return fmt.Sprintf("\033[1m%s\033[0m", fmt.Sprintf(format, vals...))
+		})
+	}
+
+	for _, net := range networks {
+		vlanStr := "-"
+		if net.VLAN > 0 {
+			vlanStr = fmt.Sprintf("%d", net.VLAN)
+		}
+		subnet := net.Subnet
+		if subnet == "" {
+			subnet = "-"
+		}
+		enabledStr := "Yes"
+		if !net.Enabled {
+			enabledStr = "No"
+		}
+		tbl.AddRow(net.ID, net.Name, net.Purpose, vlanStr, subnet, enabledStr)
+	}
+
+	if !f.NoHeaders || f.Color {
+		tbl.Print()
+	} else {
+		for _, net := range networks {
+			vlanStr := "-"
+			if net.VLAN > 0 {
+				vlanStr = fmt.Sprintf("%d", net.VLAN)
+			}
+			subnet := net.Subnet
+			if subnet == "" {
+				subnet = "-"
+			}
+			enabledStr := "Yes"
+			if !net.Enabled {
+				enabledStr = "No"
+			}
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n", net.ID, net.Name, net.Purpose, vlanStr, subnet, enabledStr)
+		}
+	}
+}
+
 // DeviceData holds device information for table output
 type DeviceData struct {
 	MAC      string
@@ -226,4 +289,121 @@ func PrintInitSuccess(configPath string) {
 	fmt.Println("     unifi sites list")
 	fmt.Println("\n  3. List devices in default site:")
 	fmt.Println("     unifi devices list --site default")
+}
+
+// FirewallRuleData holds firewall rule information for table output
+type FirewallRuleData struct {
+	ID       string
+	Name     string
+	Action   string
+	Protocol string
+	SrcAddr  string
+	DstAddr  string
+	DstPort  string
+	RuleSet  string
+	Enabled  bool
+}
+
+// PrintFirewallRulesTable outputs firewall rules in table format
+func (f *Formatter) PrintFirewallRulesTable(rules []FirewallRuleData) {
+	if len(rules) == 0 {
+		fmt.Println("No firewall rules found.")
+		return
+	}
+
+	tbl := table.New("ID", "Name", "Action", "Protocol", "Source", "Destination", "Port", "Rule Set").WithWriter(os.Stdout)
+
+	if f.Color && !f.NoHeaders {
+		tbl.WithHeaderFormatter(func(format string, vals ...interface{}) string {
+			return fmt.Sprintf("\033[1m%s\033[0m", fmt.Sprintf(format, vals...))
+		})
+	}
+
+	for _, rule := range rules {
+		srcAddr := rule.SrcAddr
+		if srcAddr == "" {
+			srcAddr = "any"
+		}
+		dstAddr := rule.DstAddr
+		if dstAddr == "" {
+			dstAddr = "any"
+		}
+		dstPort := rule.DstPort
+		if dstPort == "" {
+			dstPort = "any"
+		}
+		action := rule.Action
+		if !rule.Enabled {
+			action = action + " (disabled)"
+		}
+		tbl.AddRow(rule.ID, rule.Name, action, rule.Protocol, srcAddr, dstAddr, dstPort, rule.RuleSet)
+	}
+
+	if !f.NoHeaders || f.Color {
+		tbl.Print()
+	} else {
+		for _, rule := range rules {
+			srcAddr := rule.SrcAddr
+			if srcAddr == "" {
+				srcAddr = "any"
+			}
+			dstAddr := rule.DstAddr
+			if dstAddr == "" {
+				dstAddr = "any"
+			}
+			dstPort := rule.DstPort
+			if dstPort == "" {
+				dstPort = "any"
+			}
+			action := rule.Action
+			if !rule.Enabled {
+				action = action + " (disabled)"
+			}
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", rule.ID, rule.Name, action, rule.Protocol, srcAddr, dstAddr, dstPort, rule.RuleSet)
+		}
+	}
+}
+
+// HealthSubsystemData holds health subsystem information for table output
+type HealthSubsystemData struct {
+	Subsystem       string
+	Status          string
+	NumAdopted      int
+	NumDisconnected int
+	NumPending      int
+}
+
+// PrintHealthTable outputs health subsystems in table format
+func (f *Formatter) PrintHealthTable(subsystems []HealthSubsystemData) {
+	if len(subsystems) == 0 {
+		return
+	}
+
+	tbl := table.New("Subsystem", "Status", "Adopted", "Disconnected", "Pending").WithWriter(os.Stdout)
+
+	if f.Color && !f.NoHeaders {
+		tbl.WithHeaderFormatter(func(format string, vals ...interface{}) string {
+			return fmt.Sprintf("\033[1m%s\033[0m", fmt.Sprintf(format, vals...))
+		})
+	}
+
+	for _, sub := range subsystems {
+		status := sub.Status
+		if status == "ok" {
+			status = "✓ " + status
+		} else if status == "warning" {
+			status = "⚠ " + status
+		} else if status == "error" {
+			status = "✗ " + status
+		}
+		tbl.AddRow(sub.Subsystem, status, fmt.Sprintf("%d", sub.NumAdopted), fmt.Sprintf("%d", sub.NumDisconnected), fmt.Sprintf("%d", sub.NumPending))
+	}
+
+	if !f.NoHeaders || f.Color {
+		tbl.Print()
+	} else {
+		for _, sub := range subsystems {
+			fmt.Printf("%s\t%s\t%d\t%d\t%d\n", sub.Subsystem, sub.Status, sub.NumAdopted, sub.NumDisconnected, sub.NumPending)
+		}
+	}
 }

@@ -1,0 +1,32 @@
+# UniFi CLI Configuration Example
+# Copy this file to ~/.config/unifi/config.yaml and customize
+
+# API connection settings
+api:
+  # Base URL of your UniFi controller
+  # Examples: https://192.168.1.1, https://unifi.local, https://unifi.example.com:8443
+  base_url: https://192.168.1.1
+  
+  # Request timeout in seconds
+  timeout: 30
+
+# Authentication settings
+# NOTE: Password is NOT stored here for security. Use environment variables or flags:
+#   export UNIFI_PASSWORD=your-password
+#   unifi sites list --password your-password
+auth:
+  username: admin
+
+# Output formatting preferences
+output:
+  # Format: "table" (default) or "json"
+  format: table
+  
+  # Color mode: "auto" (default), "always", or "never"
+  # - auto: colored output when connected to a terminal
+  # - always: always use colors
+  # - never: never use colors (good for piping to other commands)
+  color: auto
+  
+  # Disable table headers (useful for scripting)
+  no_headers: false
