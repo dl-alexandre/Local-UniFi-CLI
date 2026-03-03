@@ -5,8 +5,10 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -37,6 +39,7 @@ type CLI struct {
 	Vouchers   VouchersCmd   `cmd:"" help:"Manage hotspot vouchers"`
 	Version    VersionCmd    `cmd:"" help:"Show version information"`
 	Completion CompletionCmd `cmd:"" help:"Generate shell completion scripts"`
+	Watch      WatchCmd      `cmd:"" help:"Real-time monitoring of devices and clients"`
 }
 
 // Globals contains global flags available to all commands
@@ -2600,7 +2603,374 @@ func (c *CompletionCmd) Run(g *Globals) error {
 	return nil
 }
 
-// Run parses CLI args and executes the appropriate command
+// WatchCmd handles real-time monitoring of devices and clients
+type WatchCmd struct {
+	Site     string `help:"Site ID to monitor (default: first available)" default:""`
+	Type     string `help:"What to monitor: devices, clients, all" default:"all" enum:"devices,clients,all"`
+	Interval int    `help:"Update interval in seconds" default:"5"`
+	Filter   string `help:"Filter by device type (uap, usw, udm) - only for devices"`
+}
+
+type monitorState struct {
+	devices map[string]*api.Device
+	clients map[string]*api.NetworkClient
+}
+
+func newMonitorState() *monitorState {
+	return &monitorState{
+		devices: make(map[string]*api.Device),
+		clients: make(map[string]*api.NetworkClient),
+	}
+}
+
+// clearScreen clears the terminal screen using ANSI escape codes
+func clearScreen() {
+	fmt.Print("\033[2J\033[H")
+}
+
+// formatUptime converts seconds to human-readable format
+func formatUptime(seconds int) string {
+	if seconds == 0 {
+		return "-"
+	}
+	days := seconds / 86400
+	hours := (seconds % 86400) / 3600
+	mins := (seconds % 3600) / 60
+
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh", days, hours)
+	} else if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, mins)
+	}
+	return fmt.Sprintf("%dm", mins)
+}
+
+// getAPName looks up AP name by MAC
+func (c *WatchCmd) getAPName(mac string, devices map[string]*api.Device) string {
+	if mac == "" {
+		return "-"
+	}
+	if device, ok := devices[mac]; ok {
+		if device.Name != "" {
+			return device.Name
+		}
+		return device.Model
+	}
+	return mac
+}
+
+// fetchAndUpdateDevices fetches devices and updates state without displaying
+func (c *WatchCmd) fetchAndUpdateDevices(g *Globals, siteID string, state *monitorState) error {
+	resp, err := g.appClient.ListDevices(siteID)
+	if err != nil {
+		return err
+	}
+
+	// Build current devices map
+	currentDevices := make(map[string]*api.Device)
+	for i := range resp.Data {
+		dev := &resp.Data[i]
+		currentDevices[dev.MAC] = dev
+	}
+
+	// Update state
+	state.devices = currentDevices
+	return nil
+}
+
+func (c *WatchCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	// Get site name for display
+	sitesResp, err := g.appClient.ListSites()
+	if err != nil {
+		return err
+	}
+	siteName := siteID
+	for _, site := range sitesResp.Data {
+		if site.ID == siteID || site.Name == siteID {
+			siteName = site.Name
+			break
+		}
+	}
+
+	// Validate interval
+	if c.Interval < 1 {
+		c.Interval = 1
+	}
+	if c.Interval > 300 {
+		c.Interval = 300
+	}
+
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Create ticker for polling
+	ticker := time.NewTicker(time.Duration(c.Interval) * time.Second)
+	defer ticker.Stop()
+
+	// Initialize state
+	state := newMonitorState()
+
+	// Perform initial fetch - always populate devices first for AP name lookup
+	if err := c.fetchAndUpdateDevices(g, siteID, state); err != nil {
+		return err
+	}
+
+	if err := c.updateDisplay(g, siteID, siteName, state); err != nil {
+		return err
+	}
+
+	// Main loop
+	for {
+		select {
+		case <-ticker.C:
+			if err := c.updateDisplay(g, siteID, siteName, state); err != nil {
+				// Log error but continue monitoring
+				fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
+			}
+		case <-sigChan:
+			fmt.Println("\n\nExiting watch mode...")
+			return nil
+		}
+	}
+}
+
+func (c *WatchCmd) updateDisplay(g *Globals, siteID, siteName string, state *monitorState) error {
+	now := time.Now().Format("2006-01-02 15:04:05")
+
+	// Clear screen
+	clearScreen()
+
+	// Header
+	fmt.Printf("UniFi Controller Monitor - Site: %s\n", siteName)
+	fmt.Printf("Last Update: %s (%ds interval)\n", now, c.Interval)
+	fmt.Println("Press Ctrl+C to exit")
+	fmt.Println()
+
+	showDevices := c.Type == "all" || c.Type == "devices"
+	showClients := c.Type == "all" || c.Type == "clients"
+
+	if showDevices {
+		if err := c.displayDevices(g, siteID, state); err != nil {
+			return err
+		}
+	}
+
+	if showClients {
+		if err := c.displayClients(g, siteID, state); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *WatchCmd) displayDevices(g *Globals, siteID string, state *monitorState) error {
+	resp, err := g.appClient.ListDevices(siteID)
+	if err != nil {
+		return err
+	}
+
+	// Build current devices map
+	currentDevices := make(map[string]*api.Device)
+	for i := range resp.Data {
+		dev := &resp.Data[i]
+		currentDevices[dev.MAC] = dev
+	}
+
+	// Filter by type if specified
+	var filteredDevices []api.Device
+	for _, dev := range resp.Data {
+		if c.Filter != "" && !strings.Contains(strings.ToLower(dev.Type), strings.ToLower(c.Filter)) {
+			continue
+		}
+		filteredDevices = append(filteredDevices, dev)
+	}
+
+	fmt.Printf("=== Devices (%d total) ===\n", len(filteredDevices))
+	fmt.Printf("%-8s %-18s %-12s %-15s %-15s\n", "Status", "Name", "Model", "IP", "Uptime")
+	fmt.Println(strings.Repeat("-", 80))
+
+	if len(filteredDevices) == 0 {
+		fmt.Println("No devices found.")
+	} else {
+		for _, dev := range filteredDevices {
+			// Determine status
+			status := "✓"
+			changeMark := ""
+
+			if oldDev, existed := state.devices[dev.MAC]; existed {
+				if oldDev.Adopted && !dev.Adopted {
+					status = "✗"
+					changeMark = " (DISCONNECTED!)"
+				} else if !oldDev.Adopted && dev.Adopted {
+					changeMark = " (RECONNECTED)"
+				}
+			} else {
+				changeMark = " (NEW)"
+			}
+
+			if !dev.Adopted {
+				status = "✗"
+			}
+
+			name := dev.Name
+			if name == "" {
+				name = "-"
+			}
+
+			ip := dev.IPAddress
+			if ip == "" {
+				ip = "-"
+			}
+
+			uptime := formatUptime(dev.Uptime)
+
+			// Colorize changes if terminal supports it
+			if changeMark != "" && g.appConfig.Output.Color != "never" {
+				fmt.Printf("\033[33m")
+			}
+
+			fmt.Printf("%-8s %-18s %-12s %-15s %-15s%s\n", status, name, dev.Model, ip, uptime, changeMark)
+
+			if changeMark != "" && g.appConfig.Output.Color != "never" {
+				fmt.Printf("\033[0m")
+			}
+		}
+	}
+
+	// Check for disconnected devices
+	for mac, oldDev := range state.devices {
+		if _, exists := currentDevices[mac]; !exists {
+			if g.appConfig.Output.Color != "never" {
+				fmt.Printf("\033[31m")
+			}
+			name := oldDev.Name
+			if name == "" {
+				name = "-"
+			}
+			fmt.Printf("%-8s %-18s %-12s %-15s %-15s%s\n", "✗", name, oldDev.Model, "GONE", "-", " (REMOVED)")
+			if g.appConfig.Output.Color != "never" {
+				fmt.Printf("\033[0m")
+			}
+		}
+	}
+
+	// Update state
+	state.devices = currentDevices
+
+	fmt.Println()
+	return nil
+}
+
+func (c *WatchCmd) displayClients(g *Globals, siteID string, state *monitorState) error {
+	resp, err := g.appClient.ListClients(siteID)
+	if err != nil {
+		return err
+	}
+
+	// Build current clients map
+	currentClients := make(map[string]*api.NetworkClient)
+	for i := range resp.Data {
+		client := &resp.Data[i]
+		currentClients[client.MAC] = client
+	}
+
+	fmt.Printf("=== Clients (%d total) ===\n", len(resp.Data))
+	fmt.Printf("%-20s %-15s %-10s %-20s %-12s\n", "Name", "IP", "Type", "Connected To", "Signal")
+	fmt.Println(strings.Repeat("-", 90))
+
+	if len(resp.Data) == 0 {
+		fmt.Println("No clients connected.")
+	} else {
+		for _, client := range resp.Data {
+			changeMark := ""
+
+			if _, existed := state.clients[client.MAC]; !existed {
+				changeMark = " (NEW)"
+			}
+
+			name := client.Name
+			if name == "" {
+				name = client.Hostname
+			}
+			if name == "" {
+				name = "-"
+			}
+			if len(name) > 18 {
+				name = name[:15] + "..."
+			}
+
+			ip := client.IPAddress
+			if ip == "" {
+				ip = "-"
+			}
+
+			connType := "Wireless"
+			if client.IsWired {
+				connType = "Wired"
+			}
+
+			connectedTo := c.getAPName(client.APMAC, state.devices)
+			if client.IsWired {
+				connectedTo = "-"
+			}
+
+			signal := "-"
+			if !client.IsWired {
+				signal = fmt.Sprintf("%d dBm", client.Signal)
+			}
+
+			// Colorize new clients
+			if changeMark != "" && g.appConfig.Output.Color != "never" {
+				fmt.Printf("\033[32m")
+			}
+
+			fmt.Printf("%-20s %-15s %-10s %-20s %-12s%s\n", name, ip, connType, connectedTo, signal, changeMark)
+
+			if changeMark != "" && g.appConfig.Output.Color != "never" {
+				fmt.Printf("\033[0m")
+			}
+		}
+	}
+
+	// Check for disconnected clients
+	for mac, oldClient := range state.clients {
+		if _, exists := currentClients[mac]; !exists {
+			if g.appConfig.Output.Color != "never" {
+				fmt.Printf("\033[31m")
+			}
+			name := oldClient.Name
+			if name == "" {
+				name = oldClient.Hostname
+			}
+			if name == "" {
+				name = "-"
+			}
+			if len(name) > 18 {
+				name = name[:15] + "..."
+			}
+			fmt.Printf("%-20s %-15s %-10s %-20s %-12s%s\n", name, "DISCONNECTED", "-", "-", "-", " (GONE)")
+			if g.appConfig.Output.Color != "never" {
+				fmt.Printf("\033[0m")
+			}
+		}
+	}
+
+	// Update state
+	state.clients = currentClients
+
+	return nil
+}
 func Run(args []string, version, gitCommit, buildTime string) (int, error) {
 	var cli CLI
 	parser, err := kong.New(&cli,
