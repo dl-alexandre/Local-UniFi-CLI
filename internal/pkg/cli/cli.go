@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,6 +30,7 @@ type CLI struct {
 	Clients    ClientsCmd    `cmd:"" help:"Manage clients"`
 	Firewall   FirewallCmd   `cmd:"" help:"Manage firewall rules"`
 	Traffic    TrafficCmd    `cmd:"" help:"Manage traffic rules (QoS/bandwidth control)"`
+	Stats      StatsCmd      `cmd:"" help:"Show bandwidth and traffic statistics"`
 	Settings   SettingsCmd   `cmd:"" help:"Manage controller settings"`
 	Users      UsersCmd      `cmd:"" help:"Manage local UniFi users"`
 	Backups    BackupsCmd    `cmd:"" help:"Manage controller backups"`
@@ -2570,6 +2572,227 @@ func (c *VouchersDeleteCmd) Run(g *Globals) error {
 	return nil
 }
 
+// StatsCmd groups statistics-related commands
+type StatsCmd struct {
+	Bandwidth BandwidthCmd `cmd:"" help:"Show bandwidth usage statistics"`
+}
+
+// BandwidthCmd handles the bandwidth statistics command
+type BandwidthCmd struct {
+	Site   string `help:"Site ID (default: first available)" default:""`
+	Period string `help:"Time period: 1h, 24h, 7d, 30d" default:"24h" enum:"1h,24h,7d,30d"`
+	Device string `help:"Filter by device MAC address"`
+	Output string `help:"Output format: table, json" default:"table" enum:"table,json"`
+	SortBy string `help:"Sort clients by: download, upload" default:"download" enum:"download,upload"`
+	TopN   int    `help:"Show top N clients" default:"10"`
+}
+
+func (c *BandwidthCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	// Get site name for display
+	sitesResp, err := g.appClient.ListSites()
+	if err != nil {
+		return err
+	}
+	siteName := siteID
+	for _, site := range sitesResp.Data {
+		if site.ID == siteID || site.Name == siteID {
+			siteName = site.Name
+			break
+		}
+	}
+
+	// Calculate time range based on period
+	now := time.Now()
+	var start, end int64
+	switch c.Period {
+	case "1h":
+		start = now.Add(-1 * time.Hour).Unix()
+	case "24h":
+		start = now.Add(-24 * time.Hour).Unix()
+	case "7d":
+		start = now.Add(-7 * 24 * time.Hour).Unix()
+	case "30d":
+		start = now.Add(-30 * 24 * time.Hour).Unix()
+	}
+	end = now.Unix()
+
+	// Try to get historical reports first
+	hasHistoricalData := false
+	dailyReport, err := g.appClient.GetDailyReport(siteID, start, end)
+	if err == nil && len(dailyReport.Data) > 0 {
+		hasHistoricalData = true
+	}
+
+	// Get current device stats (always available)
+	deviceStats, err := g.appClient.GetDeviceBandwidthStats(siteID)
+	if err != nil {
+		return fmt.Errorf("failed to get device stats: %w", err)
+	}
+
+	// Get current client stats
+	clientStats, err := g.appClient.GetClientBandwidthStats(siteID)
+	if err != nil {
+		return fmt.Errorf("failed to get client stats: %w", err)
+	}
+
+	// Calculate totals
+	var totalDownload, totalUpload int64
+	for _, dev := range deviceStats.Data {
+		totalDownload += dev.RxBytes
+		totalUpload += dev.TxBytes
+	}
+
+	// Build device bandwidth data
+	deviceData := make([]output.BandwidthDeviceData, 0, len(deviceStats.Data))
+	for _, dev := range deviceStats.Data {
+		if c.Device != "" && dev.MAC != c.Device {
+			continue
+		}
+		download := float64(dev.RxBytes)
+		percentage := 0.0
+		if totalDownload > 0 {
+			percentage = (download / float64(totalDownload)) * 100
+		}
+		deviceData = append(deviceData, output.BandwidthDeviceData{
+			Name:       dev.Name,
+			MAC:        dev.MAC,
+			Model:      dev.Model,
+			Download:   formatBytes(dev.RxBytes),
+			Upload:     formatBytes(dev.TxBytes),
+			Percentage: percentage,
+		})
+	}
+
+	// Sort devices by download (highest first)
+	sort.Slice(deviceData, func(i, j int) bool {
+		return deviceData[i].Percentage > deviceData[j].Percentage
+	})
+
+	// Build client bandwidth data
+	clientData := make([]output.BandwidthClientData, 0, len(clientStats.Data))
+	for _, client := range clientStats.Data {
+		// Find connected device name
+		deviceName := "-"
+		for _, dev := range deviceStats.Data {
+			if dev.MAC == client.APMAC {
+				deviceName = dev.Name
+				if deviceName == "" {
+					deviceName = dev.Model
+				}
+				break
+			}
+		}
+
+		name := client.Name
+		if name == "" {
+			name = client.Hostname
+		}
+		if name == "" {
+			name = client.MAC
+		}
+
+		clientData = append(clientData, output.BandwidthClientData{
+			Name:     name,
+			IP:       client.IPAddress,
+			Device:   deviceName,
+			Download: formatBytes(client.RxBytes),
+			Upload:   formatBytes(client.TxBytes),
+			IsWired:  client.IsWired,
+		})
+	}
+
+	// Sort clients based on SortBy flag
+	sort.Slice(clientData, func(i, j int) bool {
+		if c.SortBy == "upload" {
+			return parseBytes(clientData[i].Upload) > parseBytes(clientData[j].Upload)
+		}
+		return parseBytes(clientData[i].Download) > parseBytes(clientData[j].Download)
+	})
+
+	// Limit to TopN clients
+	if len(clientData) > c.TopN {
+		clientData = clientData[:c.TopN]
+	}
+
+	// Output format
+	if c.Output == "json" || g.appConfig.Output.Format == "json" {
+		result := map[string]interface{}{
+			"site": map[string]string{
+				"id":   siteID,
+				"name": siteName,
+			},
+			"period": c.Period,
+			"overview": map[string]string{
+				"total_download": formatBytes(totalDownload),
+				"total_upload":   formatBytes(totalUpload),
+				"average_speed":  "N/A (historical data not available)",
+			},
+			"devices": deviceData,
+			"clients": clientData,
+		}
+		if hasHistoricalData {
+			result["overview"].(map[string]string)["average_speed"] = "N/A"
+		}
+		return g.getFormatter().PrintJSON(result)
+	}
+
+	// Print header
+	fmt.Printf("Bandwidth Report - Site: %s\n", siteName)
+	fmt.Printf("Period: Last %s\n", c.Period)
+	if !hasHistoricalData {
+		fmt.Println("\nNote: Showing real-time statistics (historical data not available)")
+	}
+
+	// Print overview
+	fmt.Println("\n=== Site Overview ===")
+	fmt.Printf("Total Download: %s\n", formatBytes(totalDownload))
+	fmt.Printf("Total Upload:   %s\n", formatBytes(totalUpload))
+	if hasHistoricalData {
+		fmt.Println("Average Speed:  N/A")
+	} else {
+		fmt.Println("Average Speed:  N/A (historical data not available)")
+	}
+
+	// Print devices table
+	formatter := g.getFormatter()
+	formatter.PrintBandwidthDevicesTable(deviceData, formatBytes(totalDownload), formatBytes(totalUpload))
+
+	// Print clients table
+	fmt.Println()
+	formatter.PrintBandwidthClientsTable(clientData)
+
+	return nil
+}
+
+// parseBytes parses a human-readable byte string back to float64 for comparison
+func parseBytes(s string) float64 {
+	var val float64
+	var unit string
+	fmt.Sscanf(s, "%f %s", &val, &unit)
+
+	switch unit {
+	case "TB":
+		return val * 1024 * 1024 * 1024 * 1024
+	case "GB":
+		return val * 1024 * 1024 * 1024
+	case "MB":
+		return val * 1024 * 1024
+	case "KB":
+		return val * 1024
+	default:
+		return val
+	}
+}
+
 // VersionCmd handles the version command
 type VersionCmd struct {
 	Check bool `help:"Check for updates"`
@@ -3011,7 +3234,7 @@ _unifi_completion() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     
     # Main commands
-    local commands="init ping sites networks devices clients firewall traffic settings users backups firmware port hotspot wlan version completion"
+    local commands="init ping sites networks devices clients firewall traffic stats settings users backups firmware port hotspot wlan version completion"
     
     # Global flags
     local global_flags="--base-url --username --password --timeout --format --color --no-headers --verbose --debug --config-file --help"
@@ -3051,6 +3274,9 @@ _unifi_completion() {
             ;;
         traffic)
             COMPREPLY=( $(compgen -W "list enable disable --site --help" -- ${cur}) )
+            ;;
+        stats)
+            COMPREPLY=( $(compgen -W "bandwidth --site --period --device --output --sort-by --top-n --help" -- ${cur}) )
             ;;
         settings)
             COMPREPLY=( $(compgen -W "list get --site --category --help" -- ${cur}) )
@@ -3124,6 +3350,7 @@ _unifi() {
                 'clients[Manage clients]' \
                 'firewall[Manage firewall rules]' \
                 'traffic[Manage traffic rules (QoS/bandwidth control)]' \
+                'stats[Show bandwidth and traffic statistics]' \
                 'settings[Manage controller settings]' \
                 'users[Manage local UniFi users]' \
                 'backups[Manage controller backups]' \
@@ -3197,6 +3424,17 @@ _unifi() {
                         'enable[Enable a traffic rule]' \
                         'disable[Disable a traffic rule]' \
                         '(--site)--site=[Site ID]' \
+                        '--help[Show help]'
+                    ;;
+                stats)
+                    _arguments \
+                        'bandwidth[Show bandwidth usage statistics]' \
+                        '(--site)--site=[Site ID]' \
+                        '(--period)--period=[Time period]:period:(1h 24h 7d 30d)' \
+                        '(--device)--device=[Filter by device MAC address]' \
+                        '(--output)--output=[Output format]:format:(table json)' \
+                        '(--sort-by)--sort-by=[Sort clients by]:sort:(download upload)' \
+                        '(--top-n)--top-n=[Show top N clients]' \
                         '--help[Show help]'
                     ;;
                 settings)
@@ -3398,6 +3636,17 @@ complete -c unifi -n "__fish_seen_subcommand_from traffic" -a enable -d "Enable 
 complete -c unifi -n "__fish_seen_subcommand_from traffic" -a disable -d "Disable a traffic rule"
 complete -c unifi -n "__fish_seen_subcommand_from traffic" -l site -d "Site ID"
 complete -c unifi -n "__fish_seen_subcommand_from traffic" -l help -d "Show help"
+
+# Subcommand: stats
+complete -c unifi -n "__fish_use_subcommand" -a stats -d "Show bandwidth and traffic statistics"
+complete -c unifi -n "__fish_seen_subcommand_from stats" -a bandwidth -d "Show bandwidth usage statistics"
+complete -c unifi -n "__fish_seen_subcommand_from stats" -l site -d "Site ID"
+complete -c unifi -n "__fish_seen_subcommand_from stats" -l period -d "Time period" -a "1h 24h 7d 30d"
+complete -c unifi -n "__fish_seen_subcommand_from stats" -l device -d "Filter by device MAC address"
+complete -c unifi -n "__fish_seen_subcommand_from stats" -l output -d "Output format" -a "table json"
+complete -c unifi -n "__fish_seen_subcommand_from stats" -l sort-by -d "Sort clients by" -a "download upload"
+complete -c unifi -n "__fish_seen_subcommand_from stats" -l top-n -d "Show top N clients"
+complete -c unifi -n "__fish_seen_subcommand_from stats" -l help -d "Show help"
 
 # Subcommand: settings
 complete -c unifi -n "__fish_seen_subcommand_from settings" -a list -d "List controller/site settings"

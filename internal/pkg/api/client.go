@@ -1462,6 +1462,132 @@ func (c *Client) DeleteExpiredVouchers(siteID string) error {
 	return nil
 }
 
+// GetDeviceBandwidthStats retrieves bandwidth statistics for all devices in a site
+func (c *Client) GetDeviceBandwidthStats(siteID string) (*DeviceBandwidthStatsResponse, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/stat/device", c.sitePath(siteID))
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get device bandwidth stats request failed: %d", resp.StatusCode())
+	}
+
+	var result DeviceBandwidthStatsResponse
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse device bandwidth stats response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// GetClientBandwidthStats retrieves bandwidth statistics for all clients in a site
+func (c *Client) GetClientBandwidthStats(siteID string) (*ClientBandwidthStatsResponse, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/stat/sta", c.sitePath(siteID))
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get client bandwidth stats request failed: %d", resp.StatusCode())
+	}
+
+	var result ClientBandwidthStatsResponse
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse client bandwidth stats response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// GetDailyReport retrieves daily bandwidth reports for a site
+func (c *Client) GetDailyReport(siteID string, start, end int64) (*BandwidthReportResponse, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/stat/report/daily", c.sitePath(siteID))
+	if start > 0 && end > 0 {
+		endpoint = fmt.Sprintf("/api/s/%s/stat/report/daily?start=%d&end=%d", c.sitePath(siteID), start, end)
+	}
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get daily report request failed: %d", resp.StatusCode())
+	}
+
+	var result BandwidthReportResponse
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse daily report response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// GetHourlyReport retrieves hourly bandwidth reports for a site
+func (c *Client) GetHourlyReport(siteID string, start, end int64) (*HourlyReportResponse, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/stat/report/hourly", c.sitePath(siteID))
+	if start > 0 && end > 0 {
+		endpoint = fmt.Sprintf("/api/s/%s/stat/report/hourly?start=%d&end=%d", c.sitePath(siteID), start, end)
+	}
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get hourly report request failed: %d", resp.StatusCode())
+	}
+
+	var result HourlyReportResponse
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse hourly report response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// DeviceBandwidthStatsResponse wraps device bandwidth stats
+type DeviceBandwidthStatsResponse struct {
+	Meta Meta                   `json:"meta"`
+	Data []DeviceBandwidthStats `json:"data"`
+}
+
+// ClientBandwidthStatsResponse wraps client bandwidth stats
+type ClientBandwidthStatsResponse struct {
+	Meta Meta             `json:"meta"`
+	Data []BandwidthStats `json:"data"`
+}
+
 // ListTrafficRules retrieves all traffic rules for a specific site
 func (c *Client) ListTrafficRules(siteID string) (*TrafficRulesResponse, error) {
 	if !c.loggedIn {

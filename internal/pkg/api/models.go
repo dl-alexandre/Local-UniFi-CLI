@@ -419,3 +419,63 @@ type TrafficRuleResponse struct {
 	Meta Meta        `json:"meta"`
 	Data TrafficRule `json:"data"`
 }
+
+// BandwidthStats represents bandwidth statistics for a device or client
+type BandwidthStats struct {
+	MAC       string `json:"mac"`
+	Name      string `json:"name"`
+	Hostname  string `json:"hostname"`
+	IPAddress string `json:"ip"`
+	RxBytes   int64  `json:"rx_bytes"` // Download bytes
+	TxBytes   int64  `json:"tx_bytes"` // Upload bytes
+	RxRate    int64  `json:"rx_rate"`  // Current download rate (bps)
+	TxRate    int64  `json:"tx_rate"`  // Current upload rate (bps)
+	Signal    int    `json:"signal"`
+	IsWired   bool   `json:"is_wired"`
+	APMAC     string `json:"ap_mac"`
+	Uptime    int    `json:"uptime"`
+	LastSeen  int    `json:"last_seen"`
+}
+
+// DeviceBandwidthStats represents device-specific bandwidth stats
+type DeviceBandwidthStats struct {
+	MAC     string `json:"mac"`
+	Name    string `json:"name"`
+	Model   string `json:"model"`
+	Type    string `json:"type"`
+	RxBytes int64  `json:"rx_bytes"`
+	TxBytes int64  `json:"tx_bytes"`
+	RxRate  int64  `json:"rx_rate"`
+	TxRate  int64  `json:"tx_rate"`
+	Uptime  int    `json:"uptime"`
+}
+
+// DailyReport represents daily bandwidth statistics
+type DailyReport struct {
+	Date      string `json:"date"`
+	RxBytes   int64  `json:"rx_bytes"`
+	TxBytes   int64  `json:"tx_bytes"`
+	RxDropped int64  `json:"rx_dropped"`
+	TxDropped int64  `json:"tx_dropped"`
+}
+
+// HourlyReport represents hourly bandwidth statistics
+type HourlyReport struct {
+	Hour      int   `json:"hour"`
+	RxBytes   int64 `json:"rx_bytes"`
+	TxBytes   int64 `json:"tx_bytes"`
+	RxDropped int64 `json:"rx_dropped"`
+	TxDropped int64 `json:"tx_dropped"`
+}
+
+// BandwidthReportResponse wraps bandwidth report data
+type BandwidthReportResponse struct {
+	Meta Meta          `json:"meta"`
+	Data []DailyReport `json:"data"` // For daily reports
+}
+
+// HourlyReportResponse wraps hourly report data
+type HourlyReportResponse struct {
+	Meta Meta           `json:"meta"`
+	Data []HourlyReport `json:"data"`
+}

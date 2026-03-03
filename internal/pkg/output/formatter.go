@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/mattn/go-isatty"
 	"github.com/rodaine/table"
@@ -406,4 +407,71 @@ func (f *Formatter) PrintHealthTable(subsystems []HealthSubsystemData) {
 			fmt.Printf("%s\t%s\t%d\t%d\t%d\n", sub.Subsystem, sub.Status, sub.NumAdopted, sub.NumDisconnected, sub.NumPending)
 		}
 	}
+}
+
+// BandwidthDeviceData holds bandwidth information for a device
+type BandwidthDeviceData struct {
+	Name       string
+	MAC        string
+	Model      string
+	Download   string
+	Upload     string
+	Percentage float64
+}
+
+// PrintBandwidthDevicesTable outputs device bandwidth in table format
+func (f *Formatter) PrintBandwidthDevicesTable(devices []BandwidthDeviceData, totalDownload, totalUpload string) {
+	if len(devices) == 0 {
+		fmt.Println("No devices found.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("=== Top Devices by Usage ===")
+	fmt.Printf("%-20s %-12s %-12s %-10s\n", "Device", "Download", "Upload", "% of Total")
+	fmt.Println(strings.Repeat("-", 60))
+
+	for _, dev := range devices {
+		fmt.Printf("%-20s %-12s %-12s %6.1f%%\n", f.truncateString(dev.Name, 20), dev.Download, dev.Upload, dev.Percentage)
+	}
+
+	fmt.Println(strings.Repeat("-", 60))
+	fmt.Printf("%-20s %-12s %-12s\n", "Total", totalDownload, totalUpload)
+}
+
+// BandwidthClientData holds bandwidth information for a client
+type BandwidthClientData struct {
+	Name     string
+	IP       string
+	Device   string
+	Download string
+	Upload   string
+	IsWired  bool
+}
+
+// PrintBandwidthClientsTable outputs client bandwidth in table format
+func (f *Formatter) PrintBandwidthClientsTable(clients []BandwidthClientData) {
+	if len(clients) == 0 {
+		fmt.Println("No clients found.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("=== Top Clients by Download ===")
+	fmt.Printf("%-20s %-15s %-20s %-12s %-12s\n", "Client", "IP", "Device", "Download", "Upload")
+	fmt.Println(strings.Repeat("-", 85))
+
+	for _, client := range clients {
+		name := f.truncateString(client.Name, 20)
+		device := f.truncateString(client.Device, 20)
+		fmt.Printf("%-20s %-15s %-20s %-12s %-12s\n", name, client.IP, device, client.Download, client.Upload)
+	}
+}
+
+// truncateString truncates a string to max length
+func (f *Formatter) truncateString(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
 }
