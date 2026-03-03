@@ -31,3 +31,4 @@ config.yml
 # Temporary files
 *.tmp
 *.bak
+.env
