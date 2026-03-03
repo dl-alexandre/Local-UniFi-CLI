@@ -1,0 +1,93 @@
+name: Update Homebrew Tap
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-tap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: dl-alexandre/homebrew-tap
+          token: ${{ secrets.TAP_UPDATE_TOKEN }}
+          path: tap
+
+      - name: Download release assets
+        run: |
+          mkdir -p dist
+          cd dist
+          
+          # Download all platform binaries
+          curl -L -o unifi-darwin-arm64 "https://github.com/dl-alexandre/Local-UniFi-CLI/releases/download/${{ github.event.release.tag_name }}/unifi-darwin-arm64"
+          curl -L -o unifi-darwin-amd64 "https://github.com/dl-alexandre/Local-UniFi-CLI/releases/download/${{ github.event.release.tag_name }}/unifi-darwin-amd64"
+          curl -L -o unifi-linux-arm64 "https://github.com/dl-alexandre/Local-UniFi-CLI/releases/download/${{ github.event.release.tag_name }}/unifi-linux-arm64"
+          curl -L -o unifi-linux-amd64 "https://github.com/dl-alexandre/Local-UniFi-CLI/releases/download/${{ github.event.release.tag_name }}/unifi-linux-amd64"
+
+      - name: Calculate SHA256 hashes
+        id: hashes
+        run: |
+          cd dist
+          echo "darwin_arm64=$(sha256sum unifi-darwin-arm64 | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "darwin_amd64=$(sha256sum unifi-darwin-amd64 | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "linux_arm64=$(sha256sum unifi-linux-arm64 | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "linux_amd64=$(sha256sum unifi-linux-amd64 | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+
+      - name: Update formula
+        run: |
+          cd tap
+          
+          # Update the formula file
+          cat > Formula/unifi.rb << 'EOF'
+          class Unifi < Formula
+            desc "Local UniFi Controller CLI"
+            homepage "https://github.com/dl-alexandre/Local-UniFi-CLI"
+            version "${{ steps.hashes.outputs.version }}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/dl-alexandre/Local-UniFi-CLI/releases/download/${{ steps.hashes.outputs.version }}/unifi-darwin-arm64"
+                sha256 "${{ steps.hashes.outputs.darwin_arm64 }}"
+              end
+              if Hardware::CPU.intel?
+                url "https://github.com/dl-alexandre/Local-UniFi-CLI/releases/download/${{ steps.hashes.outputs.version }}/unifi-darwin-amd64"
+                sha256 "${{ steps.hashes.outputs.darwin_amd64 }}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/dl-alexandre/Local-UniFi-CLI/releases/download/${{ steps.hashes.outputs.version }}/unifi-linux-arm64"
+                sha256 "${{ steps.hashes.outputs.linux_arm64 }}"
+              end
+              if Hardware::CPU.intel?
+                url "https://github.com/dl-alexandre/Local-UniFi-CLI/releases/download/${{ steps.hashes.outputs.version }}/unifi-linux-amd64"
+                sha256 "${{ steps.hashes.outputs.linux_amd64 }}"
+              end
+            end
+
+            def install
+              bin.install "unifi-darwin-arm64" => "unifi" if OS.mac? && Hardware::CPU.arm?
+              bin.install "unifi-darwin-amd64" => "unifi" if OS.mac? && Hardware::CPU.intel?
+              bin.install "unifi-linux-arm64" => "unifi" if OS.linux? && Hardware::CPU.arm?
+              bin.install "unifi-linux-amd64" => "unifi" if OS.linux? && Hardware::CPU.intel?
+            end
+
+            test do
+              system "#{bin}/unifi", "version"
+            end
+          end
+          EOF
+
+      - name: Commit and push changes
+        run: |
+          cd tap
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add Formula/unifi.rb
+          git commit -m "Update unifi to ${{ github.event.release.tag_name }}" || echo "No changes to commit"
+          git push
