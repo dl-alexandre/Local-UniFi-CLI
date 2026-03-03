@@ -1137,7 +1137,10 @@ func (c *DeleteFirewallRuleCmd) Run(g *Globals) error {
 	if !c.Force {
 		fmt.Printf("Are you sure you want to delete firewall rule %s? (y/N): ", c.RuleID)
 		var response string
-		fmt.Scanln(&response)
+		if _, err := fmt.Scanln(&response); err != nil {
+			// If we can't read input, require --force flag
+			return fmt.Errorf("use --force to skip confirmation in non-interactive mode")
+		}
 		if response != "y" && response != "Y" {
 			fmt.Println("Cancelled.")
 			return nil
@@ -1440,7 +1443,9 @@ func (c *DeleteUserCmd) Run(g *Globals) error {
 	if !c.Force {
 		fmt.Printf("Are you sure you want to delete user %s? (y/N): ", c.UserID)
 		var response string
-		fmt.Scanln(&response)
+		if _, err := fmt.Scanln(&response); err != nil {
+			return fmt.Errorf("use --force to skip confirmation in non-interactive mode")
+		}
 		if response != "y" && response != "Y" {
 			fmt.Println("Cancelled.")
 			return nil
@@ -1732,7 +1737,9 @@ func (c *RestoreBackupCmd) Run(g *Globals) error {
 		fmt.Printf("All current settings will be replaced. This action cannot be undone.\n")
 		fmt.Printf("Are you sure you want to continue? (y/N): ")
 		var response string
-		fmt.Scanln(&response)
+		if _, err := fmt.Scanln(&response); err != nil {
+			return fmt.Errorf("use --force to skip confirmation in non-interactive mode")
+		}
 		if response != "y" && response != "Y" {
 			fmt.Println("Cancelled.")
 			return nil
@@ -2551,7 +2558,6 @@ func (c *TrafficDisableCmd) Run(g *Globals) error {
 	fmt.Printf("✓ Traffic rule %s disabled\n", c.Rule)
 	return nil
 }
-
 
 // VouchersCmd groups voucher-related commands
 type VouchersCmd struct {

@@ -1,0 +1,35 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+
+linters-settings:
+  errcheck:
+    exclude-functions:
+      - (*net/http/httptest.ResponseRecorder).Write
+      - (*net/http/httptest.ResponseRecorder).WriteHeader
+      - (io.Writer).Write
+      - (*encoding/json.Encoder).Encode
+
+issues:
+  exclude-rules:
+    # Exclude errcheck in test files for common patterns
+    - path: _test.go
+      linters:
+        - errcheck
+    # Exclude shadow checking in test files
+    - path: _test.go
+      text: "shadow"
+      linters:
+        - govet
+  exclude-dirs:
+    - vendor

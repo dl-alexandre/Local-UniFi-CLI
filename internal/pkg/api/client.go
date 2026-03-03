@@ -981,7 +981,7 @@ func (c *Client) UpgradeFirmware(deviceMAC string, version string) error {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/default/cmd/devmgr/upgrade")
+	endpoint := "/api/s/default/cmd/devmgr/upgrade"
 	payload := map[string]interface{}{
 		"mac": deviceMAC,
 	}
