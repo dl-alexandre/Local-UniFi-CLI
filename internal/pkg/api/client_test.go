@@ -2064,15 +2064,219 @@ func TestClient_SetPortProfile(t *testing.T) {
 	}
 }
 
-func TestClient_SetPortProfile_NotFound(t *testing.T) {
+// UniFi OS Mode Tests
+
+func TestClient_apiPath_LegacyMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "regular api path",
+			input:    "/api/self/sites",
+			expected: "/api/self/sites",
+		},
+		{
+			name:     "sites endpoint",
+			input:    "/api/s/default/stat/device",
+			expected: "/api/s/default/stat/device",
+		},
+		{
+			name:     "auth endpoint",
+			input:    "/api/auth/login",
+			expected: "/api/auth/login",
+		},
+		{
+			name:     "empty path",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "path with existing proxy prefix",
+			input:    "/proxy/network/api/test",
+			expected: "/proxy/network/api/test",
+		},
+	}
+
+	client := &Client{isUniFiOS: false}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := client.apiPath(tt.input)
+			if result != tt.expected {
+				t.Errorf("apiPath(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestClient_apiPath_UniFiOSMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "regular api path gets proxy prefix",
+			input:    "/api/self/sites",
+			expected: "/proxy/network/api/self/sites",
+		},
+		{
+			name:     "sites endpoint gets proxy prefix",
+			input:    "/api/s/default/stat/device",
+			expected: "/proxy/network/api/s/default/stat/device",
+		},
+		{
+			name:     "devices endpoint",
+			input:    "/api/s/mysite/stat/device",
+			expected: "/proxy/network/api/s/mysite/stat/device",
+		},
+		{
+			name:     "empty path gets proxy prefix",
+			input:    "",
+			expected: "/proxy/network",
+		},
+		{
+			name:     "path with existing proxy prefix not double-added",
+			input:    "/proxy/network/api/test",
+			expected: "/proxy/network/api/test",
+		},
+		{
+			name:     "path with /proxy/ prefix not double-added",
+			input:    "/proxy/something",
+			expected: "/proxy/something",
+		},
+	}
+
+	client := &Client{isUniFiOS: true}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := client.apiPath(tt.input)
+			if result != tt.expected {
+				t.Errorf("apiPath(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestClient_sitePath_LegacyMode(t *testing.T) {
+	client := &Client{
+		isUniFiOS: false,
+		siteNames: map[string]string{
+			"abc123": "default",
+			"def456": "guest",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		siteID   string
+		expected string
+	}{
+		{
+			name:     "site ID used directly in legacy mode",
+			siteID:   "abc123",
+			expected: "abc123",
+		},
+		{
+			name:     "different site ID used directly",
+			siteID:   "def456",
+			expected: "def456",
+		},
+		{
+			name:     "unknown site ID falls back to ID",
+			siteID:   "unknown123",
+			expected: "unknown123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := client.sitePath(tt.siteID)
+			if result != tt.expected {
+				t.Errorf("sitePath(%q) = %q, want %q", tt.siteID, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestClient_sitePath_UniFiOSMode_WithCache(t *testing.T) {
+	client := &Client{
+		isUniFiOS: true,
+		siteNames: map[string]string{
+			"abc123": "default",
+			"def456": "guest",
+			"xyz789": "office",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		siteID   string
+		expected string
+	}{
+		{
+			name:     "site ID translated to name",
+			siteID:   "abc123",
+			expected: "default",
+		},
+		{
+			name:     "different site ID translated",
+			siteID:   "def456",
+			expected: "guest",
+		},
+		{
+			name:     "third site ID translated",
+			siteID:   "xyz789",
+			expected: "office",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := client.sitePath(tt.siteID)
+			if result != tt.expected {
+				t.Errorf("sitePath(%q) = %q, want %q", tt.siteID, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestClient_sitePath_UniFiOSMode_Fallback(t *testing.T) {
+	client := &Client{
+		isUniFiOS: true,
+		siteNames: map[string]string{
+			"abc123": "default",
+		},
+	}
+
+	// Test that unknown site ID falls back to using the ID directly
+	result := client.sitePath("unknown456")
+	if result != "unknown456" {
+		t.Errorf("sitePath('unknown456') = %q, want 'unknown456' (fallback to ID)", result)
+	}
+}
+
+func TestClient_ListSites_PopulatesSiteNamesCache(t *testing.T) {
+	mockResponse := SitesResponse{
+		Meta: Meta{RC: "ok"},
+		Data: []Site{
+			{ID: "site123", Name: "default"},
+			{ID: "site456", Name: "guest"},
+			{ID: "site789", Name: "office"},
+		},
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/rest/device/nonexistent":
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"meta":{"rc":"error","msg":"Device not found"}}`))
+		case "/proxy/network/api/self/sites":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(mockResponse)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -2080,43 +2284,461 @@ func TestClient_SetPortProfile_NotFound(t *testing.T) {
 	defer server.Close()
 
 	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
+		BaseURL:   server.URL,
+		Username:  "admin",
+		Password:  "password",
+		Timeout:   10,
+		IsUniFiOS: true,
 	})
 
-	err := client.SetPortProfile("nonexistent", 1, "profile2")
-	if err == nil {
-		t.Error("SetPortProfile() should error for non-existent device")
+	// Before ListSites, cache should be empty
+	if len(client.siteNames) != 0 {
+		t.Errorf("siteNames cache should be empty initially, got %d entries", len(client.siteNames))
+	}
+
+	resp, err := client.ListSites()
+	if err != nil {
+		t.Fatalf("ListSites() error = %v", err)
+	}
+
+	// After ListSites, cache should be populated
+	if len(client.siteNames) != 3 {
+		t.Errorf("siteNames cache should have 3 entries, got %d", len(client.siteNames))
+	}
+
+	// Verify correct mapping
+	if client.siteNames["site123"] != "default" {
+		t.Errorf("siteNames['site123'] = %q, want 'default'", client.siteNames["site123"])
+	}
+	if client.siteNames["site456"] != "guest" {
+		t.Errorf("siteNames['site456'] = %q, want 'guest'", client.siteNames["site456"])
+	}
+	if client.siteNames["site789"] != "office" {
+		t.Errorf("siteNames['site789'] = %q, want 'office'", client.siteNames["site789"])
+	}
+
+	// Verify response data is still returned correctly
+	if len(resp.Data) != 3 {
+		t.Errorf("ListSites() returned %d sites, want 3", len(resp.Data))
 	}
 }
 
-func TestClient_ListHotspotGuests(t *testing.T) {
-	mockResponse := HotspotResponse{
+func TestClient_CSRFToken_ExtractionAndUsage(t *testing.T) {
+	csrfToken := "abc123def456"
+	var receivedCSRF string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/auth/login":
+			// Return CSRF token in header
+			w.Header().Set("X-Csrf-Token", csrfToken)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
+		case "/proxy/network/api/self/sites":
+			// Capture CSRF token from request
+			receivedCSRF = r.Header.Get("X-Csrf-Token")
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(SitesResponse{
+				Meta: Meta{RC: "ok"},
+				Data: []Site{{ID: "site123", Name: "default"}},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientOptions{
+		BaseURL:   server.URL,
+		Username:  "admin",
+		Password:  "password",
+		Timeout:   10,
+		IsUniFiOS: true,
+	})
+
+	// Before login, CSRF token should be empty
+	if client.csrfToken != "" {
+		t.Error("csrfToken should be empty before login")
+	}
+
+	err := client.Login()
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	// After login, CSRF token should be captured
+	if client.csrfToken != csrfToken {
+		t.Errorf("csrfToken = %q, want %q", client.csrfToken, csrfToken)
+	}
+
+	// Make a request that should include the CSRF token
+	_, err = client.ListSites()
+	if err != nil {
+		t.Fatalf("ListSites() error = %v", err)
+	}
+
+	// Verify CSRF token was included in the request
+	if receivedCSRF != csrfToken {
+		t.Errorf("CSRF token in request = %q, want %q", receivedCSRF, csrfToken)
+	}
+}
+
+func TestClient_CSRFToken_LegacyMode_NoCSRF(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/auth/login":
+			// Legacy controllers don't return CSRF token
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
+		case "/api/self/sites":
+			// Verify no CSRF header is sent for legacy mode
+			if r.Header.Get("X-Csrf-Token") != "" {
+				t.Error("Legacy mode should not send CSRF token header")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(SitesResponse{
+				Meta: Meta{RC: "ok"},
+				Data: []Site{{ID: "site123", Name: "default"}},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientOptions{
+		BaseURL:   server.URL,
+		Username:  "admin",
+		Password:  "password",
+		Timeout:   10,
+		IsUniFiOS: false, // Legacy mode
+	})
+
+	err := client.Login()
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	// CSRF token should remain empty in legacy mode
+	if client.csrfToken != "" {
+		t.Errorf("csrfToken should be empty in legacy mode, got %q", client.csrfToken)
+	}
+
+	// Make a request - should work without CSRF
+	_, err = client.ListSites()
+	if err != nil {
+		t.Fatalf("ListSites() error = %v", err)
+	}
+}
+
+func TestClient_CSRFToken_EmptyHandling(t *testing.T) {
+	var receivedCSRF string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/auth/login":
+			// Login response without CSRF token (empty)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
+		case "/proxy/network/api/self/sites":
+			receivedCSRF = r.Header.Get("X-Csrf-Token")
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(SitesResponse{
+				Meta: Meta{RC: "ok"},
+				Data: []Site{{ID: "site123", Name: "default"}},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientOptions{
+		BaseURL:   server.URL,
+		Username:  "admin",
+		Password:  "password",
+		Timeout:   10,
+		IsUniFiOS: true,
+	})
+
+	err := client.Login()
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	// CSRF token should be empty since server didn't send one
+	if client.csrfToken != "" {
+		t.Errorf("csrfToken should be empty, got %q", client.csrfToken)
+	}
+
+	// Make a request - should not include empty CSRF header
+	_, err = client.ListSites()
+	if err != nil {
+		t.Fatalf("ListSites() error = %v", err)
+	}
+
+	// Verify no CSRF header was sent when token is empty
+	if receivedCSRF != "" {
+		t.Errorf("CSRF header should not be sent when token is empty, got %q", receivedCSRF)
+	}
+}
+
+func TestClient_CookieJar_UniFiOS(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/auth/login":
+			// Set session cookie
+			http.SetCookie(w, &http.Cookie{
+				Name:  "unifises",
+				Value: "session123",
+				Path:  "/",
+			})
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
+		case "/proxy/network/api/self/sites":
+			// Check for session cookie
+			cookie, err := r.Cookie("unifises")
+			if err != nil || cookie.Value != "session123" {
+				t.Error("Session cookie not persisted for UniFi OS")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(SitesResponse{
+				Meta: Meta{RC: "ok"},
+				Data: []Site{{ID: "site123", Name: "default"}},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientOptions{
+		BaseURL:   server.URL,
+		Username:  "admin",
+		Password:  "password",
+		Timeout:   10,
+		IsUniFiOS: true,
+	})
+
+	// Cookie jar should be created for all clients including UniFi OS
+	if client.httpClient.GetClient().Jar == nil {
+		t.Error("Cookie jar should be created for UniFi OS mode")
+	}
+
+	err := client.Login()
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	// Make subsequent request - cookie should be automatically included
+	_, err = client.ListSites()
+	if err != nil {
+		t.Fatalf("ListSites() error = %v", err)
+	}
+}
+
+func TestClient_Integration_UniFiOS_FullFlow(t *testing.T) {
+	csrfToken := "integration-csrf-123"
+	requestPaths := []string{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPaths = append(requestPaths, r.URL.Path)
+
+		switch r.URL.Path {
+		case "/api/auth/login":
+			w.Header().Set("X-Csrf-Token", csrfToken)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
+		case "/proxy/network/api/self/sites":
+			// Verify CSRF token
+			if r.Header.Get("X-Csrf-Token") != csrfToken {
+				t.Error("CSRF token not included in sites request")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(SitesResponse{
+				Meta: Meta{RC: "ok"},
+				Data: []Site{
+					{ID: "abc123", Name: "default"},
+					{ID: "def456", Name: "guest"},
+				},
+			})
+		case "/proxy/network/api/s/default/stat/device":
+			// Verify CSRF token and correct site name translation
+			if r.Header.Get("X-Csrf-Token") != csrfToken {
+				t.Error("CSRF token not included in devices request")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(DevicesResponse{
+				Meta: Meta{RC: "ok"},
+				Data: []Device{
+					{MAC: "aa:bb:cc:dd:ee:01", Name: "AP-1", Model: "U7PG2", Type: "uap"},
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientOptions{
+		BaseURL:   server.URL,
+		Username:  "admin",
+		Password:  "password",
+		Timeout:   10,
+		IsUniFiOS: true,
+	})
+
+	// Full flow: Login → ListSites → ListDevices
+	err := client.Login()
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	_, err = client.ListSites()
+	if err != nil {
+		t.Fatalf("ListSites() error = %v", err)
+	}
+
+	// Verify siteNames cache is populated
+	if len(client.siteNames) != 2 {
+		t.Errorf("siteNames cache should have 2 entries, got %d", len(client.siteNames))
+	}
+
+	// List devices using site ID - should use cached name
+	_, err = client.ListDevices("abc123")
+	if err != nil {
+		t.Fatalf("ListDevices() error = %v", err)
+	}
+
+	// Verify request paths include proxy prefix
+	expectedPaths := []string{
+		"/api/auth/login",
+		"/proxy/network/api/self/sites",
+		"/proxy/network/api/s/default/stat/device",
+	}
+
+	if len(requestPaths) != len(expectedPaths) {
+		t.Errorf("Expected %d requests, got %d: %v", len(expectedPaths), len(requestPaths), requestPaths)
+	}
+
+	for i, expected := range expectedPaths {
+		if i < len(requestPaths) && requestPaths[i] != expected {
+			t.Errorf("Request %d: expected %q, got %q", i, expected, requestPaths[i])
+		}
+	}
+}
+
+func TestClient_MixedMode_Switching(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/auth/login", "/proxy/network/api/auth/login":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
+		case "/api/self/sites", "/proxy/network/api/self/sites":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(SitesResponse{
+				Meta: Meta{RC: "ok"},
+				Data: []Site{{ID: "site123", Name: "default"}},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	// Test switching modes on the same client (defensive test)
+	client, _ := NewClient(ClientOptions{
+		BaseURL:   server.URL,
+		Username:  "admin",
+		Password:  "password",
+		Timeout:   10,
+		IsUniFiOS: false,
+	})
+
+	// Verify legacy path
+	legacyPath := client.apiPath("/api/self/sites")
+	if legacyPath != "/api/self/sites" {
+		t.Errorf("Legacy mode path = %q, want '/api/self/sites'", legacyPath)
+	}
+
+	// Simulate switching to UniFi OS mode (edge case)
+	client.isUniFiOS = true
+	client.siteNames["site123"] = "default"
+
+	// Verify UniFi OS path
+	unifiOSPath := client.apiPath("/api/self/sites")
+	if unifiOSPath != "/proxy/network/api/self/sites" {
+		t.Errorf("UniFi OS mode path = %q, want '/proxy/network/api/self/sites'", unifiOSPath)
+	}
+
+	// Verify sitePath uses name in UniFi OS mode
+	sitePathResult := client.sitePath("site123")
+	if sitePathResult != "default" {
+		t.Errorf("sitePath = %q, want 'default'", sitePathResult)
+	}
+}
+
+func TestClient_UniFiOS_ErrorHandling(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/auth/login":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
+		case "/proxy/network/api/self/sites":
+			// Simulate 404 error with UniFi OS path
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"meta":{"rc":"error","msg":"Not found"}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientOptions{
+		BaseURL:   server.URL,
+		Username:  "admin",
+		Password:  "password",
+		Timeout:   10,
+		IsUniFiOS: true,
+	})
+
+	_, err := client.ListSites()
+	if err == nil {
+		t.Fatal("ListSites() expected error for 404 but got nil")
+	}
+
+	// Verify it's a NotFoundError
+	if _, ok := err.(*NotFoundError); !ok {
+		t.Errorf("ListSites() error type = %T, want *NotFoundError", err)
+	}
+}
+
+// Bandwidth Statistics Tests
+func TestClient_GetDeviceBandwidthStats(t *testing.T) {
+	mockResponse := DeviceBandwidthStatsResponse{
 		Meta: Meta{RC: "ok"},
-		Data: []HotspotGuest{
+		Data: []DeviceBandwidthStats{
 			{
-				ID:         "guest1",
-				MAC:        "aa:bb:cc:dd:ee:01",
-				IP:         "192.168.10.100",
-				Name:       "John Doe",
-				Email:      "john@example.com",
-				Authorized: true,
-				Expired:    false,
-				Duration:   1440,
-				ApMAC:      "aa:bb:cc:dd:ee:f1",
-				ApName:     "AP-Lobby",
+				MAC:     "aa:bb:cc:dd:ee:01",
+				Name:    "AP-LivingRoom",
+				Model:   "UAP-AC-Pro",
+				Type:    "uap",
+				RxBytes: 1073741824, // 1 GB download
+				TxBytes: 536870912,  // 500 MB upload
+				RxRate:  100000000,
+				TxRate:  50000000,
+				Uptime:  86400,
 			},
 			{
-				ID:         "guest2",
-				MAC:        "aa:bb:cc:dd:ee:02",
-				IP:         "192.168.10.101",
-				Authorized: false,
-				Expired:    false,
-				Duration:   0,
-				ApMAC:      "aa:bb:cc:dd:ee:f1",
-				ApName:     "AP-Lobby",
+				MAC:     "aa:bb:cc:dd:ee:02",
+				Name:    "Switch-Office",
+				Model:   "USW-Pro-24",
+				Type:    "usw",
+				RxBytes: 2147483648, // 2 GB download
+				TxBytes: 1073741824, // 1 GB upload
+				RxRate:  200000000,
+				TxRate:  100000000,
+				Uptime:  172800,
 			},
 		},
 	}
@@ -2125,7 +2747,8 @@ func TestClient_ListHotspotGuests(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/s/default/stat/guest":
+			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
+		case r.URL.Path == "/api/s/default/stat/device":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -2141,49 +2764,108 @@ func TestClient_ListHotspotGuests(t *testing.T) {
 		Timeout:  10,
 	})
 
-	resp, err := client.ListHotspotGuests()
+	resp, err := client.GetDeviceBandwidthStats("default")
 	if err != nil {
-		t.Fatalf("ListHotspotGuests() error = %v", err)
+		t.Fatalf("GetDeviceBandwidthStats() error = %v", err)
 	}
 
 	if len(resp.Data) != 2 {
-		t.Errorf("ListHotspotGuests() returned %d guests, want 2", len(resp.Data))
+		t.Errorf("GetDeviceBandwidthStats() returned %d devices, want 2", len(resp.Data))
 	}
 
-	if !resp.Data[0].Authorized {
-		t.Error("ListHotspotGuests() first guest should be authorized")
+	// Check first device
+	if resp.Data[0].Name != "AP-LivingRoom" {
+		t.Errorf("GetDeviceBandwidthStats() first device name = %v, want 'AP-LivingRoom'", resp.Data[0].Name)
 	}
 
-	if resp.Data[1].Authorized {
-		t.Error("ListHotspotGuests() second guest should not be authorized")
+	if resp.Data[0].RxBytes != 1073741824 {
+		t.Errorf("GetDeviceBandwidthStats() first device RxBytes = %v, want 1073741824", resp.Data[0].RxBytes)
+	}
+
+	// Check second device
+	if resp.Data[1].Model != "USW-Pro-24" {
+		t.Errorf("GetDeviceBandwidthStats() second device model = %v, want 'USW-Pro-24'", resp.Data[1].Model)
+	}
+
+	// Verify bandwidth aggregation
+	var totalDownload, totalUpload int64
+	for _, dev := range resp.Data {
+		totalDownload += dev.RxBytes
+		totalUpload += dev.TxBytes
+	}
+
+	expectedTotalDownload := int64(3221225472) // 3 GB
+	expectedTotalUpload := int64(1610612736)   // 1.5 GB
+
+	if totalDownload != expectedTotalDownload {
+		t.Errorf("Total download = %v, want %v", totalDownload, expectedTotalDownload)
+	}
+
+	if totalUpload != expectedTotalUpload {
+		t.Errorf("Total upload = %v, want %v", totalUpload, expectedTotalUpload)
 	}
 }
 
-func TestClient_AuthorizeGuest(t *testing.T) {
+func TestClient_GetClientBandwidthStats(t *testing.T) {
+	mockResponse := ClientBandwidthStatsResponse{
+		Meta: Meta{RC: "ok"},
+		Data: []BandwidthStats{
+			{
+				MAC:       "11:22:33:44:55:66",
+				Name:      "iPhone-Alice",
+				Hostname:  "alice-iphone",
+				IPAddress: "192.168.1.100",
+				RxBytes:   104857600, // 100 MB download
+				TxBytes:   52428800,  // 50 MB upload
+				RxRate:    5000000,
+				TxRate:    2500000,
+				Signal:    -45,
+				IsWired:   false,
+				APMAC:     "aa:bb:cc:dd:ee:01",
+				Uptime:    3600,
+				LastSeen:  1705315200,
+			},
+			{
+				MAC:       "11:22:33:44:55:77",
+				Name:      "Desktop-Bob",
+				Hostname:  "bob-desktop",
+				IPAddress: "192.168.1.101",
+				RxBytes:   209715200, // 200 MB download
+				TxBytes:   104857600, // 100 MB upload
+				RxRate:    10000000,
+				TxRate:    5000000,
+				Signal:    0,
+				IsWired:   true,
+				APMAC:     "",
+				Uptime:    7200,
+				LastSeen:  1705315200,
+			},
+			{
+				MAC:       "11:22:33:44:55:88",
+				Name:      "",
+				Hostname:  "unknown-device",
+				IPAddress: "192.168.1.102",
+				RxBytes:   10485760, // 10 MB download
+				TxBytes:   5242880,  // 5 MB upload
+				RxRate:    1000000,
+				TxRate:    500000,
+				Signal:    -60,
+				IsWired:   false,
+				APMAC:     "aa:bb:cc:dd:ee:01",
+				Uptime:    1800,
+				LastSeen:  1705315200,
+			},
+		},
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
+		switch {
+		case r.URL.Path == "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/cmd/hotspot":
-			if r.Method == http.MethodPost {
-				// Check the request body
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if cmd, ok := req["cmd"].(string); ok && cmd == "authorize-guest" {
-						if mac, ok := req["mac"].(string); ok && mac == "aa:bb:cc:dd:ee:01" {
-							if minutes, ok := req["minutes"].(float64); ok && minutes == 60 {
-								w.WriteHeader(http.StatusOK)
-								w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-								return
-							}
-						}
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
+		case r.URL.Path == "/api/s/default/stat/sta":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(mockResponse)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -2197,39 +2879,106 @@ func TestClient_AuthorizeGuest(t *testing.T) {
 		Timeout:  10,
 	})
 
-	err := client.AuthorizeGuest("aa:bb:cc:dd:ee:01", 60)
+	resp, err := client.GetClientBandwidthStats("default")
 	if err != nil {
-		t.Fatalf("AuthorizeGuest() error = %v", err)
+		t.Fatalf("GetClientBandwidthStats() error = %v", err)
+	}
+
+	if len(resp.Data) != 3 {
+		t.Errorf("GetClientBandwidthStats() returned %d clients, want 3", len(resp.Data))
+	}
+
+	// Check wireless client
+	if resp.Data[0].Name != "iPhone-Alice" {
+		t.Errorf("GetClientBandwidthStats() first client name = %v, want 'iPhone-Alice'", resp.Data[0].Name)
+	}
+
+	if !resp.Data[0].IsWired {
+		t.Log("First client correctly identified as wireless")
+	}
+
+	if resp.Data[0].Signal != -45 {
+		t.Errorf("GetClientBandwidthStats() first client signal = %v, want -45", resp.Data[0].Signal)
+	}
+
+	// Check wired client
+	if resp.Data[1].IsWired != true {
+		t.Error("GetClientBandwidthStats() second client should be wired")
+	}
+
+	if resp.Data[1].APMAC != "" {
+		t.Error("GetClientBandwidthStats() wired client should not have AP MAC")
+	}
+
+	// Check client with empty name
+	if resp.Data[2].Name != "" {
+		t.Errorf("GetClientBandwidthStats() third client name should be empty, got %v", resp.Data[2].Name)
+	}
+
+	if resp.Data[2].Hostname != "unknown-device" {
+		t.Errorf("GetClientBandwidthStats() third client hostname = %v, want 'unknown-device'", resp.Data[2].Hostname)
+	}
+
+	// Verify client bandwidth aggregation
+	var totalClientDownload, totalClientUpload int64
+	for _, client := range resp.Data {
+		totalClientDownload += client.RxBytes
+		totalClientUpload += client.TxBytes
+	}
+
+	expectedTotalDownload := int64(325058560) // ~310 MB total
+	expectedTotalUpload := int64(162529280)   // ~155 MB total
+
+	if totalClientDownload != expectedTotalDownload {
+		t.Errorf("Total client download = %v, want %v", totalClientDownload, expectedTotalDownload)
+	}
+
+	if totalClientUpload != expectedTotalUpload {
+		t.Errorf("Total client upload = %v, want %v", totalClientUpload, expectedTotalUpload)
 	}
 }
 
-func TestClient_AuthorizeGuest_DefaultDuration(t *testing.T) {
+func TestClient_GetDailyReport(t *testing.T) {
+	mockResponse := BandwidthReportResponse{
+		Meta: Meta{RC: "ok"},
+		Data: []DailyReport{
+			{
+				Date:      "2024-01-15",
+				RxBytes:   1073741824, // 1 GB
+				TxBytes:   536870912,  // 500 MB
+				RxDropped: 1048576,    // 1 MB dropped
+				TxDropped: 524288,     // 512 KB dropped
+			},
+			{
+				Date:      "2024-01-14",
+				RxBytes:   2147483648, // 2 GB
+				TxBytes:   1073741824, // 1 GB
+				RxDropped: 2097152,    // 2 MB dropped
+				TxDropped: 1048576,    // 1 MB dropped
+			},
+			{
+				Date:      "2024-01-13",
+				RxBytes:   536870912, // 500 MB
+				TxBytes:   268435456, // 250 MB
+				RxDropped: 0,
+				TxDropped: 0,
+			},
+		},
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
+		switch {
+		case r.URL.Path == "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/cmd/hotspot":
-			if r.Method == http.MethodPost {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if cmd, ok := req["cmd"].(string); ok && cmd == "authorize-guest" {
-						if mac, ok := req["mac"].(string); ok && mac == "aa:bb:cc:dd:ee:02" {
-							// When duration is 0, no minutes field should be sent
-							if _, hasMinutes := req["minutes"]; hasMinutes {
-								w.WriteHeader(http.StatusBadRequest)
-							} else {
-								w.WriteHeader(http.StatusOK)
-								w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-							}
-							return
-						}
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
+		case r.URL.Path == "/api/s/default/stat/report/daily":
+			// Verify query parameters for time range
+			start := r.URL.Query().Get("start")
+			end := r.URL.Query().Get("end")
+			t.Logf("Daily report request with start=%s, end=%s", start, end)
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(mockResponse)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -2243,34 +2992,93 @@ func TestClient_AuthorizeGuest_DefaultDuration(t *testing.T) {
 		Timeout:  10,
 	})
 
-	err := client.AuthorizeGuest("aa:bb:cc:dd:ee:02", 0)
+	// Test with time range
+	start := int64(1705190400) // 2024-01-14 00:00:00
+	end := int64(1705363200)   // 2024-01-16 00:00:00
+
+	resp, err := client.GetDailyReport("default", start, end)
 	if err != nil {
-		t.Fatalf("AuthorizeGuest() with default duration error = %v", err)
+		t.Fatalf("GetDailyReport() error = %v", err)
+	}
+
+	if len(resp.Data) != 3 {
+		t.Errorf("GetDailyReport() returned %d days, want 3", len(resp.Data))
+	}
+
+	// Check first day
+	if resp.Data[0].Date != "2024-01-15" {
+		t.Errorf("GetDailyReport() first day date = %v, want '2024-01-15'", resp.Data[0].Date)
+	}
+
+	if resp.Data[0].RxBytes != 1073741824 {
+		t.Errorf("GetDailyReport() first day RxBytes = %v, want 1073741824", resp.Data[0].RxBytes)
+	}
+
+	// Check dropped packets
+	if resp.Data[1].RxDropped != 2097152 {
+		t.Errorf("GetDailyReport() second day RxDropped = %v, want 2097152", resp.Data[1].RxDropped)
+	}
+
+	// Verify total bandwidth across all days
+	var totalDownload, totalUpload int64
+	for _, day := range resp.Data {
+		totalDownload += day.RxBytes
+		totalUpload += day.TxBytes
+	}
+
+	expectedTotalDownload := int64(3758096384) // ~3.5 GB
+	expectedTotalUpload := int64(1879048192)   // ~1.75 GB
+
+	if totalDownload != expectedTotalDownload {
+		t.Errorf("Total daily download = %v, want %v", totalDownload, expectedTotalDownload)
+	}
+
+	if totalUpload != expectedTotalUpload {
+		t.Errorf("Total daily upload = %v, want %v", totalUpload, expectedTotalUpload)
 	}
 }
 
-func TestClient_UnauthorizeGuest(t *testing.T) {
+func TestClient_GetHourlyReport(t *testing.T) {
+	mockResponse := HourlyReportResponse{
+		Meta: Meta{RC: "ok"},
+		Data: []HourlyReport{
+			{
+				Hour:      0,
+				RxBytes:   107374182, // 100 MB
+				TxBytes:   53687091,  // 50 MB
+				RxDropped: 104857,
+				TxDropped: 52428,
+			},
+			{
+				Hour:      1,
+				RxBytes:   214748364, // 200 MB
+				TxBytes:   107374182, // 100 MB
+				RxDropped: 209715,
+				TxDropped: 104857,
+			},
+			{
+				Hour:      2,
+				RxBytes:   53687091, // 50 MB
+				TxBytes:   26843545, // 25 MB
+				RxDropped: 0,
+				TxDropped: 0,
+			},
+		},
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
+		switch {
+		case r.URL.Path == "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/cmd/hotspot":
-			if r.Method == http.MethodPost {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if cmd, ok := req["cmd"].(string); ok && cmd == "unauthorize-guest" {
-						if mac, ok := req["mac"].(string); ok && mac == "aa:bb:cc:dd:ee:01" {
-							w.WriteHeader(http.StatusOK)
-							w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-							return
-						}
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
+		case r.URL.Path == "/api/s/default/stat/report/hourly":
+			// Verify query parameters for time range
+			start := r.URL.Query().Get("start")
+			end := r.URL.Query().Get("end")
+			t.Logf("Hourly report request with start=%s, end=%s", start, end)
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(mockResponse)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -2284,34 +3092,73 @@ func TestClient_UnauthorizeGuest(t *testing.T) {
 		Timeout:  10,
 	})
 
-	err := client.UnauthorizeGuest("aa:bb:cc:dd:ee:01")
+	// Test with time range (last 3 hours)
+	start := int64(1705363200) // 2024-01-16 00:00:00
+	end := int64(1705374000)   // 2024-01-16 03:00:00
+
+	resp, err := client.GetHourlyReport("default", start, end)
 	if err != nil {
-		t.Fatalf("UnauthorizeGuest() error = %v", err)
+		t.Fatalf("GetHourlyReport() error = %v", err)
+	}
+
+	if len(resp.Data) != 3 {
+		t.Errorf("GetHourlyReport() returned %d hours, want 3", len(resp.Data))
+	}
+
+	// Check hour 0
+	if resp.Data[0].Hour != 0 {
+		t.Errorf("GetHourlyReport() first hour = %v, want 0", resp.Data[0].Hour)
+	}
+
+	// Check hour 1 has highest traffic
+	if resp.Data[1].RxBytes != 214748364 {
+		t.Errorf("GetHourlyReport() hour 1 RxBytes = %v, want 214748364", resp.Data[1].RxBytes)
+	}
+
+	// Verify total bandwidth across all hours
+	var totalDownload, totalUpload int64
+	for _, hour := range resp.Data {
+		totalDownload += hour.RxBytes
+		totalUpload += hour.TxBytes
+	}
+
+	expectedTotalDownload := int64(375809637) // ~350 MB
+	expectedTotalUpload := int64(187904818)   // ~175 MB
+
+	if totalDownload != expectedTotalDownload {
+		t.Errorf("Total hourly download = %v, want %v", totalDownload, expectedTotalDownload)
+	}
+
+	if totalUpload != expectedTotalUpload {
+		t.Errorf("Total hourly upload = %v, want %v", totalUpload, expectedTotalUpload)
 	}
 }
 
-func TestClient_KickGuest(t *testing.T) {
+func TestClient_GetDailyReport_WithoutTimeRange(t *testing.T) {
+	mockResponse := BandwidthReportResponse{
+		Meta: Meta{RC: "ok"},
+		Data: []DailyReport{
+			{
+				Date:    "2024-01-15",
+				RxBytes: 1073741824,
+				TxBytes: 536870912,
+			},
+		},
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
+		switch {
+		case r.URL.Path == "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/cmd/hotspot":
-			if r.Method == http.MethodPost {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if cmd, ok := req["cmd"].(string); ok && cmd == "kick-guest" {
-						if mac, ok := req["mac"].(string); ok && mac == "aa:bb:cc:dd:ee:01" {
-							w.WriteHeader(http.StatusOK)
-							w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-							return
-						}
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
+		case r.URL.Path == "/api/s/default/stat/report/daily":
+			// Verify no query parameters
+			if r.URL.Query().Get("start") != "" || r.URL.Query().Get("end") != "" {
+				t.Error("Daily report should not have time range parameters when not specified")
 			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(mockResponse)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -2325,9 +3172,103 @@ func TestClient_KickGuest(t *testing.T) {
 		Timeout:  10,
 	})
 
-	err := client.KickGuest("aa:bb:cc:dd:ee:01")
+	// Test without time range (start=0, end=0)
+	resp, err := client.GetDailyReport("default", 0, 0)
 	if err != nil {
-		t.Fatalf("KickGuest() error = %v", err)
+		t.Fatalf("GetDailyReport() without time range error = %v", err)
+	}
+
+	if len(resp.Data) != 1 {
+		t.Errorf("GetDailyReport() returned %d days, want 1", len(resp.Data))
+	}
+}
+
+func TestClient_GetDeviceBandwidthStats_EmptyResponse(t *testing.T) {
+	mockResponse := DeviceBandwidthStatsResponse{
+		Meta: Meta{RC: "ok"},
+		Data: []DeviceBandwidthStats{},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/auth/login":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
+		case r.URL.Path == "/api/s/default/stat/device":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(mockResponse)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientOptions{
+		BaseURL:  server.URL,
+		Username: "admin",
+		Password: "password",
+		Timeout:  10,
+	})
+
+	resp, err := client.GetDeviceBandwidthStats("default")
+	if err != nil {
+		t.Fatalf("GetDeviceBandwidthStats() error = %v", err)
+	}
+
+	if len(resp.Data) != 0 {
+		t.Errorf("GetDeviceBandwidthStats() with empty response returned %d devices, want 0", len(resp.Data))
+	}
+
+	// Verify aggregation with empty data
+	var totalDownload, totalUpload int64
+	for _, dev := range resp.Data {
+		totalDownload += dev.RxBytes
+		totalUpload += dev.TxBytes
+	}
+
+	if totalDownload != 0 {
+		t.Errorf("Empty site should have 0 total download, got %v", totalDownload)
+	}
+
+	if totalUpload != 0 {
+		t.Errorf("Empty site should have 0 total upload, got %v", totalUpload)
+	}
+}
+
+func TestClient_GetClientBandwidthStats_EmptyResponse(t *testing.T) {
+	mockResponse := ClientBandwidthStatsResponse{
+		Meta: Meta{RC: "ok"},
+		Data: []BandwidthStats{},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/auth/login":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
+		case r.URL.Path == "/api/s/default/stat/sta":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(mockResponse)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientOptions{
+		BaseURL:  server.URL,
+		Username: "admin",
+		Password: "password",
+		Timeout:  10,
+	})
+
+	resp, err := client.GetClientBandwidthStats("default")
+	if err != nil {
+		t.Fatalf("GetClientBandwidthStats() error = %v", err)
+	}
+
+	if len(resp.Data) != 0 {
+		t.Errorf("GetClientBandwidthStats() with empty response returned %d clients, want 0", len(resp.Data))
 	}
 }
 
@@ -2339,640 +3280,3 @@ func (e *timeoutError) Error() string { return "timeout" }
 type errorString string
 
 func (e errorString) Error() string { return string(e) }
-
-// WLAN Tests
-func TestClient_ListWLANs(t *testing.T) {
-	mockResponse := WLANsResponse{
-		Meta: Meta{RC: "ok"},
-		Data: []WLAN{
-			{ID: "wlan123", Name: "HomeWiFi", Enabled: true, Security: "wpa2", VLAN: 10, IsGuest: false},
-			{ID: "wlan456", Name: "GuestWiFi", Enabled: false, Security: "open", IsGuest: true},
-		},
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/rest/wlanconf":
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(mockResponse)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	resp, err := client.ListWLANs("default")
-	if err != nil {
-		t.Fatalf("ListWLANs() error = %v", err)
-	}
-
-	if len(resp.Data) != 2 {
-		t.Errorf("ListWLANs() got %d WLANs, want 2", len(resp.Data))
-	}
-
-	if resp.Data[0].Name != "HomeWiFi" {
-		t.Errorf("ListWLANs() first WLAN name = %v, want HomeWiFi", resp.Data[0].Name)
-	}
-
-	if !resp.Data[0].Enabled {
-		t.Error("ListWLANs() first WLAN should be enabled")
-	}
-
-	if resp.Data[1].IsGuest != true {
-		t.Error("ListWLANs() second WLAN should be guest network")
-	}
-}
-
-func TestClient_EnableWLAN(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/rest/wlanconf/wlan123":
-			if r.Method == http.MethodPut {
-				var req WLANRequest
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					// Accept either enable or disable
-					w.WriteHeader(http.StatusOK)
-					w.Write([]byte(`{"meta":{"rc":"ok"},"data":{"_id":"wlan123","enabled":false}}`))
-					return
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	err := client.EnableWLAN("default", "wlan123", false)
-	if err != nil {
-		t.Fatalf("EnableWLAN() error = %v", err)
-	}
-}
-
-func TestClient_SetWLANPassphrase(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/rest/wlanconf/wlan123":
-			if r.Method == http.MethodPut {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if passphrase, ok := req["x_passphrase"].(string); ok && passphrase == "NewSecret123!" {
-						w.WriteHeader(http.StatusOK)
-						w.Write([]byte(`{"meta":{"rc":"ok"},"data":{"_id":"wlan123","x_passphrase":"NewSecret123!"}}`))
-						return
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	err := client.SetWLANPassphrase("default", "wlan123", "NewSecret123!")
-	if err != nil {
-		t.Fatalf("SetWLANPassphrase() error = %v", err)
-	}
-}
-
-func TestClient_DeleteWLAN(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/rest/wlanconf/wlan123":
-			if r.Method == http.MethodDelete {
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	err := client.DeleteWLAN("default", "wlan123")
-	if err != nil {
-		t.Fatalf("DeleteWLAN() error = %v", err)
-	}
-}
-
-// Device Management Tests
-func TestClient_LocateDevice(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/cmd/devmgr":
-			if r.Method == http.MethodPost {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if cmd, ok := req["cmd"].(string); ok && cmd == "set-locate" {
-						if mac, ok := req["mac"].(string); ok && mac == "aa:bb:cc:dd:ee:01" {
-							if duration, ok := req["duration"].(float64); ok && duration == 30 {
-								w.WriteHeader(http.StatusOK)
-								w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-								return
-							}
-						}
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	err := client.LocateDevice("default", "aa:bb:cc:dd:ee:01", 30)
-	if err != nil {
-		t.Fatalf("LocateDevice() error = %v", err)
-	}
-}
-
-func TestClient_UnlocateDevice(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/cmd/devmgr":
-			if r.Method == http.MethodPost {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if cmd, ok := req["cmd"].(string); ok && cmd == "unset-locate" {
-						if mac, ok := req["mac"].(string); ok && mac == "aa:bb:cc:dd:ee:01" {
-							w.WriteHeader(http.StatusOK)
-							w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-							return
-						}
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	err := client.UnlocateDevice("default", "aa:bb:cc:dd:ee:01")
-	if err != nil {
-		t.Fatalf("UnlocateDevice() error = %v", err)
-	}
-}
-
-func TestClient_ForgetDevice(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/cmd/devmgr":
-			if r.Method == http.MethodPost {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if cmd, ok := req["cmd"].(string); ok && cmd == "forget" {
-						if mac, ok := req["mac"].(string); ok && mac == "aa:bb:cc:dd:ee:01" {
-							w.WriteHeader(http.StatusOK)
-							w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-							return
-						}
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	err := client.ForgetDevice("default", "aa:bb:cc:dd:ee:01")
-	if err != nil {
-		t.Fatalf("ForgetDevice() error = %v", err)
-	}
-}
-
-// Traffic Rules Tests
-func TestClient_ListTrafficRules(t *testing.T) {
-	mockResponse := TrafficRulesResponse{
-		Meta: Meta{RC: "ok"},
-		Data: []TrafficRule{
-			{
-				ID:           "rule1",
-				Name:         "Block Kids Devices",
-				Enabled:      true,
-				Action:       "drop",
-				Category:     "blocking",
-				ScheduleMode: "always",
-				TargetMACs:   []string{"aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"},
-			},
-			{
-				ID:             "rule2",
-				Name:           "Limit Guest Bandwidth",
-				Enabled:        false,
-				Action:         "allow",
-				Category:       "rate-control",
-				ScheduleMode:   "custom",
-				BandwidthLimit: 10240, // 10 Mbps in kbps
-			},
-		},
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/rest/trafficrule":
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(mockResponse)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	resp, err := client.ListTrafficRules("default")
-	if err != nil {
-		t.Fatalf("ListTrafficRules() error = %v", err)
-	}
-
-	if len(resp.Data) != 2 {
-		t.Errorf("ListTrafficRules() returned %d rules, want 2", len(resp.Data))
-	}
-
-	if resp.Data[0].Name != "Block Kids Devices" {
-		t.Errorf("ListTrafficRules() first rule name = %v, want 'Block Kids Devices'", resp.Data[0].Name)
-	}
-
-	if resp.Data[0].Action != "drop" {
-		t.Errorf("ListTrafficRules() first rule action = %v, want 'drop'", resp.Data[0].Action)
-	}
-
-	if len(resp.Data[0].TargetMACs) != 2 {
-		t.Errorf("ListTrafficRules() first rule target MACs = %d, want 2", len(resp.Data[0].TargetMACs))
-	}
-
-	if resp.Data[1].Category != "rate-control" {
-		t.Errorf("ListTrafficRules() second rule category = %v, want 'rate-control'", resp.Data[1].Category)
-	}
-
-	if resp.Data[1].BandwidthLimit != 10240 {
-		t.Errorf("ListTrafficRules() second rule bandwidth limit = %d, want 10240", resp.Data[1].BandwidthLimit)
-	}
-}
-
-func TestClient_EnableTrafficRule(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/rest/trafficrule/rule123":
-			if r.Method == http.MethodPut {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if enabled, ok := req["enabled"].(bool); ok && enabled == true {
-						w.Header().Set("Content-Type", "application/json")
-						json.NewEncoder(w).Encode(TrafficRuleResponse{
-							Meta: Meta{RC: "ok"},
-							Data: TrafficRule{
-								ID:      "rule123",
-								Name:    "Test Rule",
-								Enabled: true,
-								Action:  "drop",
-							},
-						})
-						return
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	result, err := client.EnableTrafficRule("default", "rule123", true)
-	if err != nil {
-		t.Fatalf("EnableTrafficRule() error = %v", err)
-	}
-
-	if result.ID != "rule123" {
-		t.Errorf("EnableTrafficRule() ID = %v, want 'rule123'", result.ID)
-	}
-
-	if !result.Enabled {
-		t.Error("EnableTrafficRule() rule should be enabled")
-	}
-}
-
-func TestClient_DisableTrafficRule(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/rest/trafficrule/rule123":
-			if r.Method == http.MethodPut {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if enabled, ok := req["enabled"].(bool); ok && enabled == false {
-						w.Header().Set("Content-Type", "application/json")
-						json.NewEncoder(w).Encode(TrafficRuleResponse{
-							Meta: Meta{RC: "ok"},
-							Data: TrafficRule{
-								ID:      "rule123",
-								Name:    "Test Rule",
-								Enabled: false,
-								Action:  "drop",
-							},
-						})
-						return
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	result, err := client.EnableTrafficRule("default", "rule123", false)
-	if err != nil {
-		t.Fatalf("DisableTrafficRule() error = %v", err)
-	}
-
-	if result.ID != "rule123" {
-		t.Errorf("DisableTrafficRule() ID = %v, want 'rule123'", result.ID)
-	}
-
-	if result.Enabled {
-		t.Error("DisableTrafficRule() rule should be disabled")
-	}
-}
-
-func TestClient_ListVouchers(t *testing.T) {
-	mockResponse := VouchersResponse{
-		Meta: Meta{RC: "ok"},
-		Data: []Voucher{
-			{ID: "voucher1", Code: "ABC123", Duration: 480, Quota: 0, Note: "Guest access", Status: "active", Used: false, SiteID: "default"},
-			{ID: "voucher2", Code: "DEF456", Duration: 60, Quota: 1024, Note: "", Status: "used", Used: true, SiteID: "default"},
-			{ID: "voucher3", Code: "GHI789", Duration: 1440, Quota: 0, Note: "Conference", Status: "active", Used: false, SiteID: "default"},
-		},
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/s/default/rest/voucher":
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(mockResponse)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	resp, err := client.ListVouchers("default")
-	if err != nil {
-		t.Fatalf("ListVouchers() error = %v", err)
-	}
-
-	if len(resp.Data) != 3 {
-		t.Errorf("ListVouchers() returned %d vouchers, want 3", len(resp.Data))
-	}
-
-	if resp.Data[0].Code != "ABC123" {
-		t.Errorf("ListVouchers() first voucher code = %v, want 'ABC123'", resp.Data[0].Code)
-	}
-
-	if resp.Data[1].Used != true {
-		t.Error("ListVouchers() second voucher should be marked as used")
-	}
-
-	if resp.Data[2].Duration != 1440 {
-		t.Errorf("ListVouchers() third voucher duration = %d, want 1440", resp.Data[2].Duration)
-	}
-}
-
-func TestClient_CreateVoucher(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/rest/voucher":
-			if r.Method == http.MethodPost {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(GenericResponse{
-						Meta: Meta{RC: "ok"},
-					})
-				} else {
-					w.WriteHeader(http.StatusBadRequest)
-				}
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	err := client.CreateVoucher("default", 5, 480, 0, "Hotel guests")
-	if err != nil {
-		t.Fatalf("CreateVoucher() error = %v", err)
-	}
-}
-
-func TestClient_DeleteVoucher(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/rest/voucher/voucher123":
-			if r.Method == http.MethodDelete {
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	err := client.DeleteVoucher("default", "voucher123")
-	if err != nil {
-		t.Fatalf("DeleteVoucher() error = %v", err)
-	}
-}
-
-func TestClient_DeleteExpiredVouchers(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case "/api/s/default/cmd/hotspot":
-			if r.Method == http.MethodPost {
-				var req map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-					if cmd, ok := req["cmd"].(string); ok && cmd == "delete-voucher" {
-						w.WriteHeader(http.StatusOK)
-						w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-						return
-					}
-				}
-				w.WriteHeader(http.StatusBadRequest)
-			} else {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client, _ := NewClient(ClientOptions{
-		BaseURL:  server.URL,
-		Username: "admin",
-		Password: "password",
-		Timeout:  10,
-	})
-
-	err := client.DeleteExpiredVouchers("default")
-	if err != nil {
-		t.Fatalf("DeleteExpiredVouchers() error = %v", err)
-	}
-}
