@@ -1375,7 +1375,7 @@ func (c *Client) ListWLANs(siteID string) (*WLANsResponse, error) {
 }
 
 // GetWLAN retrieves a specific wireless network by ID
-func (c *Client) GetWLAN(siteID, wlanID string) (*WLANResponse, error) {
+func (c *Client) GetWLAN(siteID, wlanID string) (*WLAN, error) {
 	if !c.loggedIn {
 		if err := c.Login(); err != nil {
 			return nil, err
@@ -1384,7 +1384,6 @@ func (c *Client) GetWLAN(siteID, wlanID string) (*WLANResponse, error) {
 
 	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
 	resp, err := c.httpClient.R().
-		SetResult(&WLANResponse{}).
 		Get(c.apiPath(endpoint))
 
 	if err != nil {
@@ -1395,7 +1394,20 @@ func (c *Client) GetWLAN(siteID, wlanID string) (*WLANResponse, error) {
 		return nil, fmt.Errorf("failed to get WLAN: %d", resp.StatusCode())
 	}
 
-	return resp.Result().(*WLANResponse), nil
+	// Parse the response manually since it returns an array
+	var result struct {
+		Meta Meta   `json:"meta"`
+		Data []WLAN `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse WLAN response: %w", err)
+	}
+
+	if len(result.Data) == 0 {
+		return nil, fmt.Errorf("WLAN not found")
+	}
+
+	return &result.Data[0], nil
 }
 
 // UpdateWLAN updates a wireless network's settings
@@ -1454,6 +1466,133 @@ func (c *Client) DeleteWLAN(siteID, wlanID string) error {
 
 	if resp.StatusCode() != http.StatusOK {
 		return fmt.Errorf("failed to delete WLAN: %d", resp.StatusCode())
+	}
+
+	return nil
+}
+
+// SetWLANBandSteering sets the band steering mode for a wireless network
+func (c *Client) SetWLANBandSteering(siteID, wlanID, mode string) error {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return err
+		}
+	}
+
+	// First, get current WLAN config
+	currentWLAN, err := c.GetWLAN(siteID, wlanID)
+	if err != nil {
+		return fmt.Errorf("failed to get current WLAN config: %w", err)
+	}
+
+	// Prepare update request with current values plus new band steering
+	req := WLANRequest{
+		Name:             currentWLAN.Name,
+		Security:         currentWLAN.Security,
+		BandSteeringMode: mode,
+	}
+
+	// Copy passphrase if present
+	if currentWLAN.Passphrase != "" {
+		req.Passphrase = currentWLAN.Passphrase
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
+	resp, err := c.httpClient.R().
+		SetBody(req).
+		SetResult(&WLANResponse{}).
+		Put(c.apiPath(endpoint))
+
+	if err != nil {
+		return &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to set band steering: %d", resp.StatusCode())
+	}
+
+	return nil
+}
+
+// SetWLANAirtimeFairness enables or disables airtime fairness
+func (c *Client) SetWLANAirtimeFairness(siteID, wlanID string, enabled bool) error {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return err
+		}
+	}
+
+	// First, get current WLAN config
+	currentWLAN, err := c.GetWLAN(siteID, wlanID)
+	if err != nil {
+		return fmt.Errorf("failed to get current WLAN config: %w", err)
+	}
+
+	// Prepare update request
+	req := WLANRequest{
+		Name:            currentWLAN.Name,
+		Security:        currentWLAN.Security,
+		AirtimeFairness: enabled,
+	}
+
+	if currentWLAN.Passphrase != "" {
+		req.Passphrase = currentWLAN.Passphrase
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
+	resp, err := c.httpClient.R().
+		SetBody(req).
+		SetResult(&WLANResponse{}).
+		Put(c.apiPath(endpoint))
+
+	if err != nil {
+		return &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to set airtime fairness: %d", resp.StatusCode())
+	}
+
+	return nil
+}
+
+// SetWLANIoTOptimization enables or disables IoT WiFi optimization
+func (c *Client) SetWLANIoTOptimization(siteID, wlanID string, enabled bool) error {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return err
+		}
+	}
+
+	// First, get current WLAN config
+	currentWLAN, err := c.GetWLAN(siteID, wlanID)
+	if err != nil {
+		return fmt.Errorf("failed to get current WLAN config: %w", err)
+	}
+
+	// Prepare update request
+	req := WLANRequest{
+		Name:            currentWLAN.Name,
+		Security:        currentWLAN.Security,
+		OptimizeIoTWifi: enabled,
+	}
+
+	if currentWLAN.Passphrase != "" {
+		req.Passphrase = currentWLAN.Passphrase
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
+	resp, err := c.httpClient.R().
+		SetBody(req).
+		SetResult(&WLANResponse{}).
+		Put(c.apiPath(endpoint))
+
+	if err != nil {
+		return &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to set IoT optimization: %d", resp.StatusCode())
 	}
 
 	return nil

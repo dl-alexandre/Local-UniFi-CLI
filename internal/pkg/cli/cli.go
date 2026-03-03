@@ -2716,15 +2716,19 @@ func (c *WiFiSetBandSteeringCmd) Run(g *Globals) error {
 		return err
 	}
 
-	_, err := g.resolveSiteID(c.Site)
+	siteID, err := g.resolveSiteID(c.Site)
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("Setting band steering to '%s' for WLAN %s...\n", c.Mode, c.WLAN)
-	fmt.Println("Note: Configure via UniFi web UI at https://192.168.1.1")
-	fmt.Println("Settings → WiFi → Advanced → Band Steering")
 
+	if err := g.appClient.SetWLANBandSteering(siteID, c.WLAN, c.Mode); err != nil {
+		return fmt.Errorf("failed to set band steering: %w", err)
+	}
+
+	fmt.Printf("✅ Band steering set to '%s' successfully\n", c.Mode)
+	fmt.Println("   Impact: 5GHz-capable devices will prefer 5GHz band")
 	return nil
 }
 
@@ -2741,16 +2745,27 @@ func (c *WiFiSetAirtimeFairnessCmd) Run(g *Globals) error {
 		return err
 	}
 
-	_, err := g.resolveSiteID(c.Site)
+	siteID, err := g.resolveSiteID(c.Site)
 	if err != nil {
 		return err
 	}
 
 	enabled := c.Enable && !c.Disable
-	fmt.Printf("Setting airtime fairness to '%v' for WLAN %s...\n", enabled, c.WLAN)
-	fmt.Println("Note: Configure via UniFi web UI at https://192.168.1.1")
-	fmt.Println("Settings → WiFi → Advanced → Airtime Fairness")
+	status := "enabled"
+	if !enabled {
+		status = "disabled"
+	}
 
+	fmt.Printf("Setting airtime fairness to %s for WLAN %s...\n", status, c.WLAN)
+
+	if err := g.appClient.SetWLANAirtimeFairness(siteID, c.WLAN, enabled); err != nil {
+		return fmt.Errorf("failed to set airtime fairness: %w", err)
+	}
+
+	fmt.Printf("✅ Airtime fairness %s successfully\n", status)
+	if enabled {
+		fmt.Println("   Impact: Prevents any single device from hogging bandwidth")
+	}
 	return nil
 }
 
@@ -2767,16 +2782,27 @@ func (c *WiFiSetIoTOptimizeCmd) Run(g *Globals) error {
 		return err
 	}
 
-	_, err := g.resolveSiteID(c.Site)
+	siteID, err := g.resolveSiteID(c.Site)
 	if err != nil {
 		return err
 	}
 
 	enabled := c.Enable && !c.Disable
-	fmt.Printf("Setting IoT optimization to '%v' for WLAN %s...\n", enabled, c.WLAN)
-	fmt.Println("Note: Configure via UniFi web UI at https://192.168.1.1")
-	fmt.Println("Settings → WiFi → Advanced → Optimize IoT WiFi Connectivity")
+	status := "enabled"
+	if !enabled {
+		status = "disabled"
+	}
 
+	fmt.Printf("Setting IoT optimization to %s for WLAN %s...\n", status, c.WLAN)
+
+	if err := g.appClient.SetWLANIoTOptimization(siteID, c.WLAN, enabled); err != nil {
+		return fmt.Errorf("failed to set IoT optimization: %w", err)
+	}
+
+	fmt.Printf("✅ IoT optimization %s successfully\n", status)
+	if enabled {
+		fmt.Println("   Impact: Reduces airtime used by smart home devices by ~30%")
+	}
 	return nil
 }
 

@@ -359,14 +359,17 @@ type WLANResponse struct {
 
 // WLANRequest wraps WLAN update request
 type WLANRequest struct {
-	Name       string `json:"name,omitempty"`
-	Enabled    bool   `json:"enabled,omitempty"`
-	Security   string `json:"security,omitempty"`
-	Passphrase string `json:"x_passphrase,omitempty"`
-	UserGroup  string `json:"usergroup_id,omitempty"`
-	VLAN       int    `json:"vlan,omitempty"`
-	IsGuest    bool   `json:"is_guest,omitempty"`
-	HideSSID   bool   `json:"hide_ssid,omitempty"`
+	Name             string `json:"name,omitempty"`
+	Enabled          bool   `json:"enabled,omitempty"`
+	Security         string `json:"security,omitempty"`
+	Passphrase       string `json:"x_passphrase,omitempty"`
+	UserGroup        string `json:"usergroup_id,omitempty"`
+	VLAN             int    `json:"vlan,omitempty"`
+	IsGuest          bool   `json:"is_guest,omitempty"`
+	HideSSID         bool   `json:"hide_ssid,omitempty"`
+	BandSteeringMode string `json:"bandsteering_mode,omitempty"`
+	AirtimeFairness  bool   `json:"atf_enabled,omitempty"`
+	OptimizeIoTWifi  bool   `json:"optimize_iot_wifi_connectivity,omitempty"`
 }
 
 // Voucher represents a hotspot access voucher
