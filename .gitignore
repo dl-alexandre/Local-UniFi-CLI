@@ -1,5 +1,5 @@
 # Binaries
-unifi
+/unifi
 *.exe
 
 # Build artifacts
