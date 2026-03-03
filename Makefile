@@ -1,4 +1,4 @@
-.PHONY: build build-all build-linux build-darwin build-windows test lint release clean format install-hooks
+.PHONY: build build-all build-linux build-darwin build-windows test lint release clean format install-hooks security check vet deps
 
 BINARY_NAME=unifi
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -40,9 +40,11 @@ lint:
 	golangci-lint run ./...
 
 # Install dependencies
+.PHONY: deps
 deps:
 	go mod download
 	go mod tidy
+	go mod verify
 
 # Clean build artifacts
 clean:
@@ -57,6 +59,15 @@ release: clean
 # Development build with debug info
 dev:
 	go build -o $(BINARY_NAME) ./cmd/unifi
+
+# Run all checks (format, vet, lint, test)
+.PHONY: check
+check: format vet lint test
+
+# Run go vet
+.PHONY: vet
+vet:
+	go vet ./...
 
 # Install locally
 install: build
@@ -77,3 +88,9 @@ install-hooks:
 	@echo "Installing git hooks..."
 	@git config core.hooksPath .githooks
 	@echo "Hooks installed from .githooks/"
+
+# Run security scan
+security:
+	@echo "Running security scan..."
+	@which gosec > /dev/null || (echo "Installing gosec..." && go install github.com/securego/gosec/v2/cmd/gosec@latest)
+	gosec -quiet ./...
