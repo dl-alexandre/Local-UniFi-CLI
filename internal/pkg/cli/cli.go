@@ -41,16 +41,18 @@ type CLI struct {
 
 // Globals contains global flags available to all commands
 type Globals struct {
-	BaseURL    string `help:"Controller base URL" env:"UNIFI_BASE_URL"`
-	Username   string `help:"Username for authentication" env:"UNIFI_USERNAME"`
-	Password   string `help:"Password for authentication" env:"UNIFI_PASSWORD"`
-	Timeout    int    `help:"Request timeout in seconds" default:"30" env:"UNIFI_TIMEOUT"`
-	Format     string `help:"Output format: table, json" default:"table" enum:"table,json" env:"UNIFI_FORMAT"`
-	Color      string `help:"Color mode: auto, always, never" default:"auto" enum:"auto,always,never" env:"UNIFI_COLOR"`
-	NoHeaders  bool   `help:"Disable table headers" env:"UNIFI_NO_HEADERS"`
-	Verbose    bool   `help:"Enable verbose output" short:"v"`
-	Debug      bool   `help:"Enable debug output"`
-	ConfigFile string `help:"Config file path" short:"c" env:"UNIFI_CONFIG"`
+	BaseURL            string `help:"Controller base URL" env:"UNIFI_BASE_URL"`
+	Username           string `help:"Username for authentication" env:"UNIFI_USERNAME"`
+	Password           string `help:"Password for authentication" env:"UNIFI_PASSWORD"`
+	Timeout            int    `help:"Request timeout in seconds" default:"30" env:"UNIFI_TIMEOUT"`
+	Format             string `help:"Output format: table, json" default:"table" enum:"table,json" env:"UNIFI_FORMAT"`
+	Color              string `help:"Color mode: auto, always, never" default:"auto" enum:"auto,always,never" env:"UNIFI_COLOR"`
+	NoHeaders          bool   `help:"Disable table headers" env:"UNIFI_NO_HEADERS"`
+	Verbose            bool   `help:"Enable verbose output" short:"v"`
+	Debug              bool   `help:"Enable debug output"`
+	InsecureSkipVerify bool   `help:"Skip TLS certificate verification" env:"UNIFI_INSECURE"`
+	IsUniFiOS          bool   `help:"Use UniFi OS API paths (Dream Machine/Cloud Key Gen2+)" env:"UNIFI_OS"`
+	ConfigFile         string `help:"Config file path" short:"c" env:"UNIFI_CONFIG"`
 
 	appConfig *config.Config
 	appClient *api.Client
@@ -86,12 +88,14 @@ func (g *Globals) initClient() error {
 	}
 
 	client, err := api.NewClient(api.ClientOptions{
-		BaseURL:  cfg.API.BaseURL,
-		Username: username,
-		Password: password,
-		Timeout:  cfg.API.Timeout,
-		Verbose:  g.Verbose,
-		Debug:    g.Debug,
+		BaseURL:            cfg.API.BaseURL,
+		Username:           username,
+		Password:           password,
+		Timeout:            cfg.API.Timeout,
+		Verbose:            g.Verbose,
+		Debug:              g.Debug,
+		InsecureSkipVerify: g.InsecureSkipVerify,
+		IsUniFiOS:          g.IsUniFiOS,
 	})
 	if err != nil {
 		return err
@@ -103,6 +107,26 @@ func (g *Globals) initClient() error {
 
 func (g *Globals) getFormatter() *output.Formatter {
 	return output.NewFormatter(g.appConfig.Output.Format, g.appConfig.Output.Color, g.appConfig.Output.NoHeaders)
+}
+
+// resolveSiteID resolves a site ID with UniFi OS support
+// For UniFi OS controllers, this ensures ListSites() is called to populate
+// the site name cache, since UniFi OS uses site names (not IDs) in API paths
+// If siteID is empty, it returns the first available site's ID
+func (g *Globals) resolveSiteID(siteID string) (string, error) {
+	if siteID == "" || g.IsUniFiOS {
+		sitesResp, err := g.appClient.ListSites()
+		if err != nil {
+			return "", err
+		}
+		if len(sitesResp.Data) == 0 {
+			return "", &api.ValidationError{Message: "no sites found"}
+		}
+		if siteID == "" {
+			siteID = sitesResp.Data[0].ID
+		}
+	}
+	return siteID, nil
 }
 
 // InitCmd handles the init command
@@ -252,16 +276,9 @@ func (c *SiteStatsCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	// Get site details
@@ -360,16 +377,9 @@ func (c *ListNetworksCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	resp, err := g.appClient.ListNetworks(siteID)
@@ -416,16 +426,9 @@ func (c *CreateNetworkCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.Name == "" {
@@ -484,16 +487,9 @@ func (c *ListDevicesCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	resp, err := g.appClient.ListDevices(siteID)
@@ -539,16 +535,9 @@ func (c *AdoptDeviceCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.MAC == "" {
@@ -581,16 +570,9 @@ func (c *ProvisionDeviceCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.DeviceID == "" {
@@ -625,16 +607,9 @@ func (c *RestartDeviceCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.MAC == "" {
@@ -669,16 +644,9 @@ func (c *LocateDeviceCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.MAC == "" {
@@ -713,16 +681,9 @@ func (c *ForgetDeviceCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.MAC == "" {
@@ -770,16 +731,9 @@ func (c *ListClientsCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	resp, err := g.appClient.ListClients(siteID)
@@ -820,16 +774,9 @@ func (c *BlockClientCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.MAC == "" {
@@ -862,16 +809,9 @@ func (c *UnblockClientCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.MAC == "" {
@@ -912,16 +852,9 @@ func (c *ListFirewallRulesCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	resp, err := g.appClient.ListFirewallRules(siteID)
@@ -973,16 +906,9 @@ func (c *CreateFirewallRuleCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.Name == "" {
@@ -1037,16 +963,9 @@ func (c *EnableFirewallRuleCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.RuleID == "" {
@@ -1057,7 +976,7 @@ func (c *EnableFirewallRuleCmd) Run(g *Globals) error {
 		"enabled": true,
 	}
 
-	_, err := g.appClient.UpdateFirewallRule(siteID, c.RuleID, updates)
+	_, err = g.appClient.UpdateFirewallRule(siteID, c.RuleID, updates)
 	if err != nil {
 		return err
 	}
@@ -1077,16 +996,9 @@ func (c *DisableFirewallRuleCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.RuleID == "" {
@@ -1097,7 +1009,7 @@ func (c *DisableFirewallRuleCmd) Run(g *Globals) error {
 		"enabled": false,
 	}
 
-	_, err := g.appClient.UpdateFirewallRule(siteID, c.RuleID, updates)
+	_, err = g.appClient.UpdateFirewallRule(siteID, c.RuleID, updates)
 	if err != nil {
 		return err
 	}
@@ -1118,16 +1030,9 @@ func (c *DeleteFirewallRuleCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.RuleID == "" {
@@ -1147,7 +1052,7 @@ func (c *DeleteFirewallRuleCmd) Run(g *Globals) error {
 		}
 	}
 
-	err := g.appClient.DeleteFirewallRule(siteID, c.RuleID)
+	err = g.appClient.DeleteFirewallRule(siteID, c.RuleID)
 	if err != nil {
 		return err
 	}
@@ -1173,16 +1078,9 @@ func (c *ListSettingsCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	resp, err := g.appClient.GetSettings(siteID)
@@ -1239,16 +1137,9 @@ func (c *GetSettingCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.Key == "" {
@@ -2219,16 +2110,9 @@ func (c *WlanListCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	resp, err := g.appClient.ListWLANs(siteID)
@@ -2284,16 +2168,9 @@ func (c *WlanEnableCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if err := g.appClient.EnableWLAN(siteID, c.WLAN, true); err != nil {
@@ -2315,16 +2192,9 @@ func (c *WlanDisableCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if err := g.appClient.EnableWLAN(siteID, c.WLAN, false); err != nil {
@@ -2347,16 +2217,9 @@ func (c *WlanSetPassCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.Password == "" {
@@ -2383,16 +2246,9 @@ func (c *WlanDeleteCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if !c.Force {
@@ -2434,16 +2290,9 @@ func (c *TrafficListCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	resp, err := g.appClient.ListTrafficRules(siteID)
@@ -2498,23 +2347,16 @@ func (c *TrafficEnableCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.Rule == "" {
 		return &api.ValidationError{Message: "rule ID is required"}
 	}
 
-	_, err := g.appClient.EnableTrafficRule(siteID, c.Rule, true)
+	_, err = g.appClient.EnableTrafficRule(siteID, c.Rule, true)
 	if err != nil {
 		return err
 	}
@@ -2534,23 +2376,16 @@ func (c *TrafficDisableCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.Rule == "" {
 		return &api.ValidationError{Message: "rule ID is required"}
 	}
 
-	_, err := g.appClient.EnableTrafficRule(siteID, c.Rule, false)
+	_, err = g.appClient.EnableTrafficRule(siteID, c.Rule, false)
 	if err != nil {
 		return err
 	}
@@ -2576,16 +2411,9 @@ func (c *VouchersListCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	resp, err := g.appClient.ListVouchers(siteID)
@@ -2664,16 +2492,9 @@ func (c *VouchersCreateCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.Count < 1 {
@@ -2694,7 +2515,7 @@ func (c *VouchersCreateCmd) Run(g *Globals) error {
 		fmt.Printf("  Note: %s\n", c.Note)
 	}
 
-	err := g.appClient.CreateVoucher(siteID, c.Count, c.Duration, c.Quota, c.Note)
+	err = g.appClient.CreateVoucher(siteID, c.Count, c.Duration, c.Quota, c.Note)
 	if err != nil {
 		return err
 	}
@@ -2717,21 +2538,14 @@ func (c *VouchersDeleteCmd) Run(g *Globals) error {
 		return err
 	}
 
-	siteID := c.Site
-	if siteID == "" {
-		sitesResp, err := g.appClient.ListSites()
-		if err != nil {
-			return err
-		}
-		if len(sitesResp.Data) == 0 {
-			return &api.ValidationError{Message: "no sites found"}
-		}
-		siteID = sitesResp.Data[0].Name
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
 	}
 
 	if c.Expired {
 		fmt.Println("Deleting all expired vouchers...")
-		err := g.appClient.DeleteExpiredVouchers(siteID)
+		err = g.appClient.DeleteExpiredVouchers(siteID)
 		if err != nil {
 			return err
 		}
@@ -2744,7 +2558,7 @@ func (c *VouchersDeleteCmd) Run(g *Globals) error {
 	}
 
 	fmt.Printf("Deleting voucher %s...\n", c.ID)
-	err := g.appClient.DeleteVoucher(siteID, c.ID)
+	err = g.appClient.DeleteVoucher(siteID, c.ID)
 	if err != nil {
 		return err
 	}

@@ -2,10 +2,12 @@
 package api
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"time"
 
@@ -23,17 +25,22 @@ type Client struct {
 	debug         bool
 	maxRetryDelay time.Duration
 	loggedIn      bool
+	isUniFiOS     bool              // Dream Machine/Cloud Key Gen2 use /proxy/network prefix
+	csrfToken     string            // CSRF token for UniFi OS
+	siteNames     map[string]string // Cache of site ID -> site name (for UniFi OS translation)
 }
 
 // ClientOptions contains configuration options for the client
 type ClientOptions struct {
-	BaseURL       string
-	Username      string
-	Password      string
-	Timeout       int // seconds
-	Verbose       bool
-	Debug         bool
-	MaxRetryDelay time.Duration
+	BaseURL            string
+	Username           string
+	Password           string
+	Timeout            int // seconds
+	Verbose            bool
+	Debug              bool
+	MaxRetryDelay      time.Duration
+	InsecureSkipVerify bool
+	IsUniFiOS          bool // Dream Machine/Cloud Key Gen2+ use /proxy/network path
 }
 
 // NewClient creates a new API client
@@ -53,6 +60,14 @@ func NewClient(opts ClientOptions) (*Client, error) {
 	client.SetBaseURL(opts.BaseURL)
 	client.SetHeader("Accept", "application/json")
 
+	// Enable cookie jar for session persistence
+	jar, _ := cookiejar.New(nil)
+	client.SetCookieJar(jar)
+
+	if opts.InsecureSkipVerify {
+		client.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
+	}
+
 	if opts.Debug {
 		client.SetDebug(true)
 	}
@@ -67,6 +82,8 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		debug:         opts.Debug,
 		maxRetryDelay: opts.MaxRetryDelay,
 		loggedIn:      false,
+		isUniFiOS:     opts.IsUniFiOS,
+		siteNames:     make(map[string]string),
 	}, nil
 }
 
@@ -94,8 +111,38 @@ func (c *Client) Login() error {
 		return &AuthError{Message: "invalid credentials"}
 	}
 
+	// Extract CSRF token for UniFi OS controllers
+	csrfToken := resp.Header().Get("X-Csrf-Token")
+	if csrfToken != "" {
+		c.csrfToken = csrfToken
+	}
+
 	c.loggedIn = true
 	return nil
+}
+
+// apiPath returns the correct API path, adding /proxy/network prefix for UniFi OS controllers
+func (c *Client) apiPath(path string) string {
+	if c.isUniFiOS && !strings.HasPrefix(path, "/proxy/") {
+		return "/proxy/network" + path
+	}
+	return path
+}
+
+// sitePath returns the correct site path identifier
+// For UniFi OS (UDM/Cloud Key Gen2+): uses site name (e.g., "default")
+// For traditional controllers: uses site ID
+func (c *Client) sitePath(siteID string) string {
+	if c.isUniFiOS {
+		// UniFi OS uses site name, not ID
+		if name, ok := c.siteNames[siteID]; ok {
+			return name
+		}
+		// If we don't have the name cached, return the ID
+		// The caller should ensure ListSites is called first
+		return siteID
+	}
+	return siteID
 }
 
 // doRequest performs an HTTP request with retry logic
@@ -104,6 +151,11 @@ func (c *Client) doRequest(req *resty.Request, endpoint string) (*resty.Response
 		if err := c.Login(); err != nil {
 			return nil, err
 		}
+	}
+
+	// Add CSRF token header for UniFi OS controllers
+	if c.isUniFiOS && c.csrfToken != "" {
+		req.SetHeader("X-Csrf-Token", c.csrfToken)
 	}
 
 	maxRetries := 3
@@ -183,7 +235,7 @@ func (c *Client) calculateBackoff(attempt int) time.Duration {
 func (c *Client) ListSites() (*SitesResponse, error) {
 	req := c.httpClient.R()
 
-	resp, err := c.doRequest(req, "/api/self/sites")
+	resp, err := c.doRequest(req, c.apiPath("/api/self/sites"))
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +245,11 @@ func (c *Client) ListSites() (*SitesResponse, error) {
 		return nil, fmt.Errorf("failed to parse sites response: %w", err)
 	}
 
+	// Populate siteNames cache for UniFi OS translation
+	for _, site := range result.Data {
+		c.siteNames[site.ID] = site.Name
+	}
+
 	return &result, nil
 }
 
@@ -200,8 +257,8 @@ func (c *Client) ListSites() (*SitesResponse, error) {
 func (c *Client) ListDevices(siteID string) (*DevicesResponse, error) {
 	req := c.httpClient.R()
 
-	endpoint := fmt.Sprintf("/api/s/%s/stat/device", siteID)
-	resp, err := c.doRequest(req, endpoint)
+	endpoint := fmt.Sprintf("/api/s/%s/stat/device", c.sitePath(siteID))
+	resp, err := c.doRequest(req, c.apiPath(endpoint))
 	if err != nil {
 		return nil, err
 	}
@@ -218,8 +275,8 @@ func (c *Client) ListDevices(siteID string) (*DevicesResponse, error) {
 func (c *Client) ListClients(siteID string) (*ClientsResponse, error) {
 	req := c.httpClient.R()
 
-	endpoint := fmt.Sprintf("/api/s/%s/stat/sta", siteID)
-	resp, err := c.doRequest(req, endpoint)
+	endpoint := fmt.Sprintf("/api/s/%s/stat/sta", c.sitePath(siteID))
+	resp, err := c.doRequest(req, c.apiPath(endpoint))
 	if err != nil {
 		return nil, err
 	}
@@ -236,8 +293,8 @@ func (c *Client) ListClients(siteID string) (*ClientsResponse, error) {
 func (c *Client) GetDevice(siteID, mac string) (*DeviceResponse, error) {
 	req := c.httpClient.R()
 
-	endpoint := fmt.Sprintf("/api/s/%s/stat/device/%s", siteID, mac)
-	resp, err := c.doRequest(req, endpoint)
+	endpoint := fmt.Sprintf("/api/s/%s/stat/device/%s", c.sitePath(siteID), mac)
+	resp, err := c.doRequest(req, c.apiPath(endpoint))
 	if err != nil {
 		return nil, err
 	}
@@ -254,8 +311,8 @@ func (c *Client) GetDevice(siteID, mac string) (*DeviceResponse, error) {
 func (c *Client) GetSiteHealth(siteID string) (*HealthResponse, error) {
 	req := c.httpClient.R()
 
-	endpoint := fmt.Sprintf("/api/s/%s/stat/health", siteID)
-	resp, err := c.doRequest(req, endpoint)
+	endpoint := fmt.Sprintf("/api/s/%s/stat/health", c.sitePath(siteID))
+	resp, err := c.doRequest(req, c.apiPath(endpoint))
 	if err != nil {
 		return nil, err
 	}
@@ -281,10 +338,10 @@ func (c *Client) AdoptDevice(siteID, mac string) (*GenericResponse, error) {
 		"mac": mac,
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/cmd/devmgr", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/cmd/devmgr", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetBody(cmd).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -320,10 +377,10 @@ func (c *Client) ProvisionDevice(siteID, deviceID string, settings map[string]in
 		body[k] = v
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/device/%s", siteID, deviceID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/device/%s", c.sitePath(siteID), deviceID)
 	resp, err := c.httpClient.R().
 		SetBody(body).
-		Put(endpoint)
+		Put(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -354,10 +411,10 @@ func (c *Client) RestartDevice(siteID, mac string) (*GenericResponse, error) {
 		"mac": mac,
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/cmd/devmgr", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/cmd/devmgr", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetBody(cmd).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -389,10 +446,10 @@ func (c *Client) LocateDevice(siteID, mac string, duration int) error {
 		"duration": duration,
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/cmd/devmgr", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/cmd/devmgr", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetBody(cmd).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -418,10 +475,10 @@ func (c *Client) UnlocateDevice(siteID, mac string) error {
 		"mac": mac,
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/cmd/devmgr", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/cmd/devmgr", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetBody(cmd).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -447,10 +504,10 @@ func (c *Client) ForgetDevice(siteID, mac string) error {
 		"mac": mac,
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/cmd/devmgr", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/cmd/devmgr", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetBody(cmd).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -471,8 +528,8 @@ func (c *Client) ListNetworks(siteID string) (*NetworksResponse, error) {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/networkconf", siteID)
-	resp, err := c.httpClient.R().Get(endpoint)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/networkconf", c.sitePath(siteID))
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -498,10 +555,10 @@ func (c *Client) CreateNetwork(siteID string, network *NetworkRequest) (*Network
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/networkconf", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/networkconf", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetBody(network).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -530,8 +587,8 @@ func (c *Client) ListFirewallRules(siteID string) (*FirewallRulesResponse, error
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/firewallrule", siteID)
-	resp, err := c.httpClient.R().Get(endpoint)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/firewallrule", c.sitePath(siteID))
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -557,10 +614,10 @@ func (c *Client) CreateFirewallRule(siteID string, rule *FirewallRuleRequest) (*
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/firewallrule", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/firewallrule", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetBody(rule).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -589,10 +646,10 @@ func (c *Client) UpdateFirewallRule(siteID, ruleID string, updates map[string]in
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/firewallrule/%s", siteID, ruleID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/firewallrule/%s", c.sitePath(siteID), ruleID)
 	resp, err := c.httpClient.R().
 		SetBody(updates).
-		Put(endpoint)
+		Put(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -621,8 +678,8 @@ func (c *Client) DeleteFirewallRule(siteID, ruleID string) error {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/firewallrule/%s", siteID, ruleID)
-	resp, err := c.httpClient.R().Delete(endpoint)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/firewallrule/%s", c.sitePath(siteID), ruleID)
+	resp, err := c.httpClient.R().Delete(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -648,10 +705,10 @@ func (c *Client) BlockClient(siteID, mac string) (*GenericResponse, error) {
 		"mac": mac,
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/cmd/stamgr", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/cmd/stamgr", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetBody(cmd).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -682,10 +739,10 @@ func (c *Client) UnblockClient(siteID, mac string) (*GenericResponse, error) {
 		"mac": mac,
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/cmd/stamgr", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/cmd/stamgr", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetBody(cmd).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -711,8 +768,8 @@ func (c *Client) GetSettings(siteID string) (*SettingsResponse, error) {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/get/setting", siteID)
-	resp, err := c.httpClient.R().Get(endpoint)
+	endpoint := fmt.Sprintf("/api/s/%s/get/setting", c.sitePath(siteID))
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -738,7 +795,15 @@ func (c *Client) ListUsers() (*UsersResponse, error) {
 		}
 	}
 
-	endpoint := "/api/self/users"
+	var endpoint string
+	if c.isUniFiOS {
+		// UniFi OS system-level endpoint (no proxy prefix needed)
+		endpoint = "/api/users/self"
+	} else {
+		// Legacy controller endpoint
+		endpoint = c.apiPath("/api/self/users")
+	}
+
 	resp, err := c.httpClient.R().Get(endpoint)
 
 	if err != nil {
@@ -768,7 +833,7 @@ func (c *Client) CreateUser(user *UserRequest) (*User, error) {
 	endpoint := "/api/self/users"
 	resp, err := c.httpClient.R().
 		SetBody(user).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -798,7 +863,7 @@ func (c *Client) DeleteUser(userID string) error {
 	}
 
 	endpoint := fmt.Sprintf("/api/self/users/%s", userID)
-	resp, err := c.httpClient.R().Delete(endpoint)
+	resp, err := c.httpClient.R().Delete(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -826,7 +891,7 @@ func (c *Client) SetUserPassword(userID, newPassword string) error {
 
 	resp, err := c.httpClient.R().
 		SetBody(payload).
-		Put(endpoint)
+		Put(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -848,7 +913,7 @@ func (c *Client) ListBackups() (*BackupsResponse, error) {
 	}
 
 	endpoint := "/api/self/backups"
-	resp, err := c.httpClient.R().Get(endpoint)
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -881,7 +946,7 @@ func (c *Client) CreateBackup(encrypt bool) (*Backup, error) {
 
 	resp, err := c.httpClient.R().
 		SetBody(payload).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -911,7 +976,7 @@ func (c *Client) DownloadBackup(backupID string) ([]byte, error) {
 	}
 
 	endpoint := fmt.Sprintf("/api/self/backups/%s/download", backupID)
-	resp, err := c.httpClient.R().Get(endpoint)
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -933,7 +998,7 @@ func (c *Client) RestoreBackup(backupID string) error {
 	}
 
 	endpoint := fmt.Sprintf("/api/self/backups/%s/restore", backupID)
-	resp, err := c.httpClient.R().Post(endpoint)
+	resp, err := c.httpClient.R().Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -955,7 +1020,7 @@ func (c *Client) ListFirmware() (*FirmwareResponse, error) {
 	}
 
 	endpoint := "/api/firmware"
-	resp, err := c.httpClient.R().Get(endpoint)
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -991,7 +1056,7 @@ func (c *Client) UpgradeFirmware(deviceMAC string, version string) error {
 
 	resp, err := c.httpClient.R().
 		SetBody(payload).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -1013,7 +1078,7 @@ func (c *Client) ListPorts() (*PortsResponse, error) {
 	}
 
 	endpoint := "/api/s/default/stat/device"
-	resp, err := c.httpClient.R().Get(endpoint)
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -1051,7 +1116,7 @@ func (c *Client) SetPortProfile(deviceID string, portIndex int, profileID string
 
 	resp, err := c.httpClient.R().
 		SetBody(payload).
-		Put(endpoint)
+		Put(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -1073,7 +1138,7 @@ func (c *Client) ListHotspotGuests() (*HotspotResponse, error) {
 	}
 
 	endpoint := "/api/s/default/stat/guest"
-	resp, err := c.httpClient.R().Get(endpoint)
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -1110,7 +1175,7 @@ func (c *Client) AuthorizeGuest(mac string, duration int) error {
 
 	resp, err := c.httpClient.R().
 		SetBody(payload).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -1139,7 +1204,7 @@ func (c *Client) UnauthorizeGuest(mac string) error {
 
 	resp, err := c.httpClient.R().
 		SetBody(payload).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -1168,7 +1233,7 @@ func (c *Client) KickGuest(mac string) error {
 
 	resp, err := c.httpClient.R().
 		SetBody(payload).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -1189,10 +1254,10 @@ func (c *Client) ListWLANs(siteID string) (*WLANsResponse, error) {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetResult(&WLANsResponse{}).
-		Get(endpoint)
+		Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -1213,10 +1278,10 @@ func (c *Client) GetWLAN(siteID, wlanID string) (*WLANResponse, error) {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", siteID, wlanID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
 	resp, err := c.httpClient.R().
 		SetResult(&WLANResponse{}).
-		Get(endpoint)
+		Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -1237,11 +1302,11 @@ func (c *Client) UpdateWLAN(siteID, wlanID string, req WLANRequest) (*WLAN, erro
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", siteID, wlanID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
 	resp, err := c.httpClient.R().
 		SetBody(req).
 		SetResult(&WLANResponse{}).
-		Put(endpoint)
+		Put(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -1275,9 +1340,9 @@ func (c *Client) DeleteWLAN(siteID, wlanID string) error {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", siteID, wlanID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
 	resp, err := c.httpClient.R().
-		Delete(endpoint)
+		Delete(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -1298,10 +1363,10 @@ func (c *Client) ListVouchers(siteID string) (*VouchersResponse, error) {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/voucher", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/voucher", c.sitePath(siteID))
 	resp, err := c.httpClient.R().
 		SetResult(&VouchersResponse{}).
-		Get(endpoint)
+		Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -1322,7 +1387,7 @@ func (c *Client) CreateVoucher(siteID string, count, duration, quota int, note s
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/voucher", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/voucher", c.sitePath(siteID))
 	payload := map[string]interface{}{
 		"count":    count,
 		"duration": duration,
@@ -1332,7 +1397,7 @@ func (c *Client) CreateVoucher(siteID string, count, duration, quota int, note s
 
 	resp, err := c.httpClient.R().
 		SetBody(payload).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -1353,9 +1418,9 @@ func (c *Client) DeleteVoucher(siteID, voucherID string) error {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/voucher/%s", siteID, voucherID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/voucher/%s", c.sitePath(siteID), voucherID)
 	resp, err := c.httpClient.R().
-		Delete(endpoint)
+		Delete(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -1376,7 +1441,7 @@ func (c *Client) DeleteExpiredVouchers(siteID string) error {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/cmd/hotspot", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/cmd/hotspot", c.sitePath(siteID))
 	payload := map[string]interface{}{
 		"cmd":      "delete-voucher",
 		"vouchers": []string{},
@@ -1384,7 +1449,7 @@ func (c *Client) DeleteExpiredVouchers(siteID string) error {
 
 	resp, err := c.httpClient.R().
 		SetBody(payload).
-		Post(endpoint)
+		Post(c.apiPath(endpoint))
 
 	if err != nil {
 		return &NetworkError{Message: err.Error()}
@@ -1405,10 +1470,13 @@ func (c *Client) ListTrafficRules(siteID string) (*TrafficRulesResponse, error) 
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/trafficrule", siteID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/trafficrule", c.sitePath(siteID))
+	if c.isUniFiOS {
+		endpoint = fmt.Sprintf("v2/api/site/%s/trafficrules", c.sitePath(siteID))
+	}
 	resp, err := c.httpClient.R().
 		SetResult(&TrafficRulesResponse{}).
-		Get(endpoint)
+		Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -1429,10 +1497,13 @@ func (c *Client) GetTrafficRule(siteID, ruleID string) (*TrafficRuleResponse, er
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/trafficrule/%s", siteID, ruleID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/trafficrule/%s", c.sitePath(siteID), ruleID)
+	if c.isUniFiOS {
+		endpoint = fmt.Sprintf("v2/api/site/%s/trafficrules/%s", c.sitePath(siteID), ruleID)
+	}
 	resp, err := c.httpClient.R().
 		SetResult(&TrafficRuleResponse{}).
-		Get(endpoint)
+		Get(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}
@@ -1453,7 +1524,10 @@ func (c *Client) EnableTrafficRule(siteID, ruleID string, enabled bool) (*Traffi
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/trafficrule/%s", siteID, ruleID)
+	endpoint := fmt.Sprintf("/api/s/%s/rest/trafficrule/%s", c.sitePath(siteID), ruleID)
+	if c.isUniFiOS {
+		endpoint = fmt.Sprintf("v2/api/site/%s/trafficrules/%s", c.sitePath(siteID), ruleID)
+	}
 	payload := map[string]interface{}{
 		"enabled": enabled,
 	}
@@ -1461,7 +1535,7 @@ func (c *Client) EnableTrafficRule(siteID, ruleID string, enabled bool) (*Traffi
 	resp, err := c.httpClient.R().
 		SetBody(payload).
 		SetResult(&TrafficRuleResponse{}).
-		Put(endpoint)
+		Put(c.apiPath(endpoint))
 
 	if err != nil {
 		return nil, &NetworkError{Message: err.Error()}

@@ -699,6 +699,17 @@ output:
 - `UNIFI_FORMAT` - Output format
 - `UNIFI_COLOR` - Color mode
 
+## UniFi OS Support
+
+### UniFi OS Limitations
+
+The following features are not available on UniFi OS controllers (UDM, UDM Pro, Cloud Key Gen2+, etc.) due to API differences:
+
+- **backups** - UniFi OS handles backups via the filesystem rather than the Network API. Use SSH or the UniFi OS interface directly for backup operations.
+- **firmware list** - UniFi OS uses a different firmware management system. Device upgrades are handled through the standard device management commands.
+
+These limitations only affect UniFi OS controllers. Traditional software controllers (self-hosted, Cloud Key Gen1) support all features.
+
 ## Exit Codes
 
 - `0` - Success
