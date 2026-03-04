@@ -14,6 +14,51 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
+// retryWithBackoff executes an operation with exponential backoff retry logic
+// It retries up to maxRetries times on rate limit (403/429) errors
+func (c *Client) retryWithBackoff(operation func() error, maxRetries int, operationName string) error {
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := operation()
+		if err == nil {
+			return nil // Success
+		}
+
+		lastErr = err
+
+		// Check if it's a rate limit error
+		if isRateLimitError(err) {
+			if attempt < maxRetries-1 {
+				backoffDuration := time.Duration(1<<attempt) * 2 * time.Second
+				fmt.Printf("Rate limited. Retrying in %d seconds... (attempt %d/%d)\n",
+					int(backoffDuration.Seconds()), attempt+1, maxRetries)
+				time.Sleep(backoffDuration)
+				continue
+			}
+		} else {
+			// Not a rate limit error, return immediately
+			return err
+		}
+	}
+
+	return fmt.Errorf("%s failed after %d attempts: %w", operationName, maxRetries, lastErr)
+}
+
+// isRateLimitError checks if an error is a rate limit error (403 or 429)
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Check for rate limit related strings in error
+	return strings.Contains(errStr, "403") ||
+		strings.Contains(errStr, "429") ||
+		strings.Contains(errStr, "rate limit") ||
+		strings.Contains(errStr, "too many requests") ||
+		strings.Contains(errStr, "forbidden")
+}
+
 // Client wraps the HTTP client for local UniFi Controller API
 type Client struct {
 	httpClient    *resty.Client
@@ -1471,131 +1516,215 @@ func (c *Client) DeleteWLAN(siteID, wlanID string) error {
 	return nil
 }
 
+// UpdateWLANSettings batch updates multiple WLAN settings at once
+// This method retrieves the current config, merges new settings, and performs a single PUT request
+func (c *Client) UpdateWLANSettings(siteID, wlanID string, settings map[string]interface{}) error {
+	operation := func() error {
+		if !c.loggedIn {
+			if err := c.Login(); err != nil {
+				return err
+			}
+		}
+
+		// Step 1: GET current WLAN config
+		endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
+		resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
+
+		if err != nil {
+			return &NetworkError{Message: err.Error()}
+		}
+
+		if resp.StatusCode() != http.StatusOK {
+			if resp.StatusCode() == http.StatusForbidden {
+				return fmt.Errorf("403 forbidden - rate limited")
+			}
+			if resp.StatusCode() == http.StatusTooManyRequests {
+				return fmt.Errorf("429 too many requests - rate limited")
+			}
+			return fmt.Errorf("failed to get WLAN config: %d", resp.StatusCode())
+		}
+
+		// Parse the response to get current config
+		var result struct {
+			Meta Meta                     `json:"meta"`
+			Data []map[string]interface{} `json:"data"`
+		}
+		if err := json.Unmarshal(resp.Body(), &result); err != nil {
+			return fmt.Errorf("failed to parse WLAN response: %w", err)
+		}
+
+		if len(result.Data) == 0 {
+			return fmt.Errorf("WLAN not found")
+		}
+
+		// Step 2: Merge new settings into current config
+		updatedConfig := result.Data[0]
+		for key, value := range settings {
+			updatedConfig[key] = value
+		}
+
+		// Step 3: PUT the updated config
+		putResp, err := c.httpClient.R().
+			SetBody(updatedConfig).
+			Put(c.apiPath(endpoint))
+
+		if err != nil {
+			return &NetworkError{Message: err.Error()}
+		}
+
+		if putResp.StatusCode() != http.StatusOK {
+			if putResp.StatusCode() == http.StatusForbidden {
+				return fmt.Errorf("403 forbidden - rate limited")
+			}
+			if putResp.StatusCode() == http.StatusTooManyRequests {
+				return fmt.Errorf("429 too many requests - rate limited")
+			}
+			return fmt.Errorf("failed to update WLAN: %d", putResp.StatusCode())
+		}
+
+		return nil
+	}
+
+	return c.retryWithBackoff(operation, 3, "UpdateWLANSettings")
+}
+
 // SetWLANBandSteering sets the band steering mode for a wireless network
 func (c *Client) SetWLANBandSteering(siteID, wlanID, mode string) error {
-	if !c.loggedIn {
-		if err := c.Login(); err != nil {
-			return err
+	operation := func() error {
+		// First, get current WLAN config
+		currentWLAN, err := c.GetWLAN(siteID, wlanID)
+		if err != nil {
+			return fmt.Errorf("failed to get current WLAN config: %w", err)
 		}
+
+		// Prepare update request with current values plus new band steering
+		req := WLANRequest{
+			Name:             currentWLAN.Name,
+			Security:         currentWLAN.Security,
+			BandSteeringMode: mode,
+		}
+
+		// Copy passphrase if present
+		if currentWLAN.Passphrase != "" {
+			req.Passphrase = currentWLAN.Passphrase
+		}
+
+		endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
+		resp, err := c.httpClient.R().
+			SetBody(req).
+			SetResult(&WLANResponse{}).
+			Put(c.apiPath(endpoint))
+
+		if err != nil {
+			return &NetworkError{Message: err.Error()}
+		}
+
+		if resp.StatusCode() != http.StatusOK {
+			if resp.StatusCode() == http.StatusForbidden {
+				return fmt.Errorf("403 forbidden - rate limited")
+			}
+			if resp.StatusCode() == http.StatusTooManyRequests {
+				return fmt.Errorf("429 too many requests - rate limited")
+			}
+			return fmt.Errorf("failed to set band steering: %d", resp.StatusCode())
+		}
+
+		return nil
 	}
 
-	// First, get current WLAN config
-	currentWLAN, err := c.GetWLAN(siteID, wlanID)
-	if err != nil {
-		return fmt.Errorf("failed to get current WLAN config: %w", err)
-	}
-
-	// Prepare update request with current values plus new band steering
-	req := WLANRequest{
-		Name:             currentWLAN.Name,
-		Security:         currentWLAN.Security,
-		BandSteeringMode: mode,
-	}
-
-	// Copy passphrase if present
-	if currentWLAN.Passphrase != "" {
-		req.Passphrase = currentWLAN.Passphrase
-	}
-
-	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
-	resp, err := c.httpClient.R().
-		SetBody(req).
-		SetResult(&WLANResponse{}).
-		Put(c.apiPath(endpoint))
-
-	if err != nil {
-		return &NetworkError{Message: err.Error()}
-	}
-
-	if resp.StatusCode() != http.StatusOK {
-		return fmt.Errorf("failed to set band steering: %d", resp.StatusCode())
-	}
-
-	return nil
+	return c.retryWithBackoff(operation, 3, "SetWLANBandSteering")
 }
 
 // SetWLANAirtimeFairness enables or disables airtime fairness
 func (c *Client) SetWLANAirtimeFairness(siteID, wlanID string, enabled bool) error {
-	if !c.loggedIn {
-		if err := c.Login(); err != nil {
-			return err
+	operation := func() error {
+		// First, get current WLAN config
+		currentWLAN, err := c.GetWLAN(siteID, wlanID)
+		if err != nil {
+			return fmt.Errorf("failed to get current WLAN config: %w", err)
 		}
+
+		// Prepare update request
+		req := WLANRequest{
+			Name:            currentWLAN.Name,
+			Security:        currentWLAN.Security,
+			AirtimeFairness: enabled,
+		}
+
+		if currentWLAN.Passphrase != "" {
+			req.Passphrase = currentWLAN.Passphrase
+		}
+
+		endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
+		resp, err := c.httpClient.R().
+			SetBody(req).
+			SetResult(&WLANResponse{}).
+			Put(c.apiPath(endpoint))
+
+		if err != nil {
+			return &NetworkError{Message: err.Error()}
+		}
+
+		if resp.StatusCode() != http.StatusOK {
+			if resp.StatusCode() == http.StatusForbidden {
+				return fmt.Errorf("403 forbidden - rate limited")
+			}
+			if resp.StatusCode() == http.StatusTooManyRequests {
+				return fmt.Errorf("429 too many requests - rate limited")
+			}
+			return fmt.Errorf("failed to set airtime fairness: %d", resp.StatusCode())
+		}
+
+		return nil
 	}
 
-	// First, get current WLAN config
-	currentWLAN, err := c.GetWLAN(siteID, wlanID)
-	if err != nil {
-		return fmt.Errorf("failed to get current WLAN config: %w", err)
-	}
-
-	// Prepare update request
-	req := WLANRequest{
-		Name:            currentWLAN.Name,
-		Security:        currentWLAN.Security,
-		AirtimeFairness: enabled,
-	}
-
-	if currentWLAN.Passphrase != "" {
-		req.Passphrase = currentWLAN.Passphrase
-	}
-
-	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
-	resp, err := c.httpClient.R().
-		SetBody(req).
-		SetResult(&WLANResponse{}).
-		Put(c.apiPath(endpoint))
-
-	if err != nil {
-		return &NetworkError{Message: err.Error()}
-	}
-
-	if resp.StatusCode() != http.StatusOK {
-		return fmt.Errorf("failed to set airtime fairness: %d", resp.StatusCode())
-	}
-
-	return nil
+	return c.retryWithBackoff(operation, 3, "SetWLANAirtimeFairness")
 }
 
 // SetWLANIoTOptimization enables or disables IoT WiFi optimization
 func (c *Client) SetWLANIoTOptimization(siteID, wlanID string, enabled bool) error {
-	if !c.loggedIn {
-		if err := c.Login(); err != nil {
-			return err
+	operation := func() error {
+		// First, get current WLAN config
+		currentWLAN, err := c.GetWLAN(siteID, wlanID)
+		if err != nil {
+			return fmt.Errorf("failed to get current WLAN config: %w", err)
 		}
+
+		// Prepare update request
+		req := WLANRequest{
+			Name:            currentWLAN.Name,
+			Security:        currentWLAN.Security,
+			OptimizeIoTWifi: enabled,
+		}
+
+		if currentWLAN.Passphrase != "" {
+			req.Passphrase = currentWLAN.Passphrase
+		}
+
+		endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
+		resp, err := c.httpClient.R().
+			SetBody(req).
+			SetResult(&WLANResponse{}).
+			Put(c.apiPath(endpoint))
+
+		if err != nil {
+			return &NetworkError{Message: err.Error()}
+		}
+
+		if resp.StatusCode() != http.StatusOK {
+			if resp.StatusCode() == http.StatusForbidden {
+				return fmt.Errorf("403 forbidden - rate limited")
+			}
+			if resp.StatusCode() == http.StatusTooManyRequests {
+				return fmt.Errorf("429 too many requests - rate limited")
+			}
+			return fmt.Errorf("failed to set IoT optimization: %d", resp.StatusCode())
+		}
+
+		return nil
 	}
 
-	// First, get current WLAN config
-	currentWLAN, err := c.GetWLAN(siteID, wlanID)
-	if err != nil {
-		return fmt.Errorf("failed to get current WLAN config: %w", err)
-	}
-
-	// Prepare update request
-	req := WLANRequest{
-		Name:            currentWLAN.Name,
-		Security:        currentWLAN.Security,
-		OptimizeIoTWifi: enabled,
-	}
-
-	if currentWLAN.Passphrase != "" {
-		req.Passphrase = currentWLAN.Passphrase
-	}
-
-	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf/%s", c.sitePath(siteID), wlanID)
-	resp, err := c.httpClient.R().
-		SetBody(req).
-		SetResult(&WLANResponse{}).
-		Put(c.apiPath(endpoint))
-
-	if err != nil {
-		return &NetworkError{Message: err.Error()}
-	}
-
-	if resp.StatusCode() != http.StatusOK {
-		return fmt.Errorf("failed to set IoT optimization: %d", resp.StatusCode())
-	}
-
-	return nil
+	return c.retryWithBackoff(operation, 3, "SetWLANIoTOptimization")
 }
 
 // ListVouchers retrieves all vouchers for a specific site

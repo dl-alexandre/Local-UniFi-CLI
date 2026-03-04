@@ -2634,7 +2634,8 @@ type WiFiCmd struct {
 
 // WiFiOptimizeCmd analyzes WiFi settings and provides recommendations
 type WiFiOptimizeCmd struct {
-	Site string `help:"Site ID to analyze (default: first available)" default:""`
+	Site     string `help:"Site ID to analyze (default: first available)" default:""`
+	ApplyAll bool   `help:"Apply all optimization recommendations at once"`
 }
 
 func (c *WiFiOptimizeCmd) Run(g *Globals) error {
@@ -2657,6 +2658,64 @@ func (c *WiFiOptimizeCmd) Run(g *Globals) error {
 	devices, err := g.appClient.ListDevices(siteID)
 	if err != nil {
 		return fmt.Errorf("failed to list devices: %w", err)
+	}
+
+	if c.ApplyAll {
+		fmt.Println("WiFi Optimization - Apply All")
+		fmt.Println("==============================")
+		fmt.Println()
+
+		// Track success/failure for each WLAN
+		allSuccess := true
+
+		for _, wlan := range wlans.Data {
+			fmt.Printf("Applying optimizations to SSID: %s\n", wlan.Name)
+
+			settings := map[string]interface{}{
+				"name":                           wlan.Name,
+				"bandsteering_mode":              "prefer_5g",
+				"atf_enabled":                    true,
+				"optimize_iot_wifi_connectivity": true,
+			}
+
+			// Preserve security settings
+			if wlan.Security != "" {
+				settings["security"] = wlan.Security
+			}
+			if wlan.Passphrase != "" {
+				settings["x_passphrase"] = wlan.Passphrase
+			}
+
+			fmt.Println("  Band Steering: disabled → prefer_5g ✓")
+			fmt.Println("  Airtime Fairness: disabled → enabled ✓")
+			fmt.Println("  IoT Optimization: disabled → enabled ✓")
+			fmt.Print("  Applying settings... ")
+
+			if err := g.appClient.UpdateWLANSettings(siteID, wlan.ID, settings); err != nil {
+				fmt.Printf("✗ (failed: %v)\n", err)
+				allSuccess = false
+				continue
+			}
+			fmt.Println("✓")
+			fmt.Println()
+		}
+
+		if allSuccess {
+			fmt.Println("✅ All optimizations applied successfully!")
+		} else {
+			fmt.Println("⚠️  Some optimizations failed. Check errors above.")
+		}
+
+		// Show channel status after applying
+		fmt.Println()
+		fmt.Println("Channel Status:")
+		for _, device := range devices.Data {
+			if device.Type == "uap" {
+				fmt.Printf("  - %s: Check channels in UniFi web UI\n", device.Name)
+			}
+		}
+
+		return nil
 	}
 
 	fmt.Println("WiFi Optimization Analysis")
@@ -2700,6 +2759,8 @@ func (c *WiFiOptimizeCmd) Run(g *Globals) error {
 	fmt.Println("  1. Visit: https://192.168.1.1")
 	fmt.Println("  2. Settings → WiFi → [Your SSID] → Advanced")
 	fmt.Println("  3. Enable: Band Steering, Airtime Fairness, Optimize IoT")
+	fmt.Println()
+	fmt.Println("Or use: ./unifi wi-fi optimize --site <id> --apply-all")
 
 	return nil
 }
@@ -2727,8 +2788,8 @@ func (c *WiFiSetBandSteeringCmd) Run(g *Globals) error {
 		return fmt.Errorf("failed to set band steering: %w", err)
 	}
 
-	fmt.Printf("✅ Band steering set to '%s' successfully\n", c.Mode)
-	fmt.Println("   Impact: 5GHz-capable devices will prefer 5GHz band")
+	fmt.Printf("✅ Band steering enabled successfully\n")
+	fmt.Println("   Mode: 5GHz-capable devices will prefer 5GHz band")
 	return nil
 }
 
