@@ -1,0 +1,67 @@
+# GoReleaser configuration for Local UniFi CLI
+# Documentation: https://goreleaser.com
+
+version: 2
+
+project_name: unifi
+
+before:
+  hooks:
+    # Install dependencies
+    - go mod tidy
+    - go mod download
+    # Run tests to ensure quality before release
+    - go test ./...
+
+builds:
+  - id: unifi
+    main: ./cmd/unifi
+    binary: unifi
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.gitCommit={{.Commit}}
+      - -X main.buildTime={{.Date}}
+    flags:
+      - -trimpath
+
+archives:
+  - id: unifi
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+      - completions/*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: dl-alexandre
+    name: Local-UniFi-CLI
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
