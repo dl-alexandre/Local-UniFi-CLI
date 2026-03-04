@@ -1,0 +1,58 @@
+version: '3'
+
+tasks:
+  build:
+    desc: Build the binary
+    cmds:
+      - go build -o bin/unifi ./cmd/unifi
+  
+  test:
+    desc: Run tests
+    cmds:
+      - go test -v ./...
+  
+  lint:
+    desc: Run linter
+    cmds:
+      - golangci-lint run
+  
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf bin/ dist/
+      - go clean
+  
+  dev:
+    desc: Run in development mode
+    cmds:
+      - go run ./cmd/unifi
+  
+  install:
+    desc: Install locally
+    cmds:
+      - go build -o bin/unifi ./cmd/unifi
+      - cp bin/unifi /usr/local/bin/
+  
+  release:
+    desc: Build release binaries for all platforms
+    cmds:
+      - task: build-linux
+      - task: build-darwin
+      - task: build-windows
+  
+  build-linux:
+    desc: Build for Linux
+    cmds:
+      - GOOS=linux GOARCH=amd64 go build -o bin/unifi-linux-amd64 ./cmd/unifi
+      - GOOS=linux GOARCH=arm64 go build -o bin/unifi-linux-arm64 ./cmd/unifi
+  
+  build-darwin:
+    desc: Build for macOS
+    cmds:
+      - GOOS=darwin GOARCH=amd64 go build -o bin/unifi-darwin-amd64 ./cmd/unifi
+      - GOOS=darwin GOARCH=arm64 go build -o bin/unifi-darwin-arm64 ./cmd/unifi
+  
+  build-windows:
+    desc: Build for Windows
+    cmds:
+      - GOOS=windows GOARCH=amd64 go build -o bin/unifi-windows-amd64.exe ./cmd/unifi
