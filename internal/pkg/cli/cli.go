@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	updater "github.com/dl-alexandre/Local-UniFi-CLI/internal/cli"
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/api"
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/config"
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/output"
@@ -22,27 +23,28 @@ import (
 type CLI struct {
 	Globals
 
-	Init       InitCmd       `cmd:"" help:"Interactive configuration setup"`
-	Ping       PingCmd       `cmd:"" help:"Test connectivity to controller"`
-	Sites      SitesCmd      `cmd:"" help:"Manage sites"`
-	Networks   NetworksCmd   `cmd:"" help:"Manage networks/VLANs"`
-	Devices    DevicesCmd    `cmd:"" help:"Manage devices"`
-	Clients    ClientsCmd    `cmd:"" help:"Manage clients"`
-	Firewall   FirewallCmd   `cmd:"" help:"Manage firewall rules"`
-	Traffic    TrafficCmd    `cmd:"" help:"Manage traffic rules (QoS/bandwidth control)"`
-	Stats      StatsCmd      `cmd:"" help:"Show bandwidth and traffic statistics"`
-	Settings   SettingsCmd   `cmd:"" help:"Manage controller settings"`
-	Users      UsersCmd      `cmd:"" help:"Manage local UniFi users"`
-	Backups    BackupsCmd    `cmd:"" help:"Manage controller backups"`
-	Firmware   FirmwareCmd   `cmd:"" help:"Manage device firmware"`
-	Port       PortCmd       `cmd:"" help:"Manage switch ports"`
-	Hotspot    HotspotCmd    `cmd:"" help:"Manage hotspot guests"`
-	WLAN       WlanCmd       `cmd:"" help:"Manage wireless networks (SSIDs)"`
-	Vouchers   VouchersCmd   `cmd:"" help:"Manage hotspot vouchers"`
-	Version    VersionCmd    `cmd:"" help:"Show version information"`
-	Completion CompletionCmd `cmd:"" help:"Generate shell completion scripts"`
-	Watch      WatchCmd      `cmd:"" help:"Real-time monitoring of devices and clients"`
-	WiFi       WiFiCmd       `cmd:"" help:"WiFi optimization and analysis"`
+	Init        InitCmd        `cmd:"" help:"Interactive configuration setup"`
+	Ping        PingCmd        `cmd:"" help:"Test connectivity to controller"`
+	Sites       SitesCmd       `cmd:"" help:"Manage sites"`
+	Networks    NetworksCmd    `cmd:"" help:"Manage networks/VLANs"`
+	Devices     DevicesCmd     `cmd:"" help:"Manage devices"`
+	Clients     ClientsCmd     `cmd:"" help:"Manage clients"`
+	Firewall    FirewallCmd    `cmd:"" help:"Manage firewall rules"`
+	Traffic     TrafficCmd     `cmd:"" help:"Manage traffic rules (QoS/bandwidth control)"`
+	Stats       StatsCmd       `cmd:"" help:"Show bandwidth and traffic statistics"`
+	Settings    SettingsCmd    `cmd:"" help:"Manage controller settings"`
+	Users       UsersCmd       `cmd:"" help:"Manage local UniFi users"`
+	Backups     BackupsCmd     `cmd:"" help:"Manage controller backups"`
+	Firmware    FirmwareCmd    `cmd:"" help:"Manage device firmware"`
+	Port        PortCmd        `cmd:"" help:"Manage switch ports"`
+	Hotspot     HotspotCmd     `cmd:"" help:"Manage hotspot guests"`
+	WLAN        WlanCmd        `cmd:"" help:"Manage wireless networks (SSIDs)"`
+	Vouchers    VouchersCmd    `cmd:"" help:"Manage hotspot vouchers"`
+	Version     VersionCmd     `cmd:"" help:"Show version information"`
+	CheckUpdate CheckUpdateCmd `cmd:"" help:"Check for available updates"`
+	Completion  CompletionCmd  `cmd:"" help:"Generate shell completion scripts"`
+	Watch       WatchCmd       `cmd:"" help:"Real-time monitoring of devices and clients"`
+	WiFi        WiFiCmd        `cmd:"" help:"WiFi optimization and analysis"`
 }
 
 // Globals contains global flags available to all commands
@@ -3100,6 +3102,24 @@ func (c *VersionCmd) Run(g *Globals) error {
 
 	output.PrintVersion(version, gitCommit, buildTime, c.Check)
 	return nil
+}
+
+// CheckUpdateCmd handles checking for available updates
+type CheckUpdateCmd struct {
+	Force bool `help:"Force check, bypassing cache" flag:"force"`
+}
+
+func (c *CheckUpdateCmd) Run(g *Globals) error {
+	cmd := &updater.UpdateCheckCmd{
+		Force:  c.Force,
+		Format: g.Format,
+	}
+
+	globals := &updater.Globals{
+		Cache: nil, // No cache for explicit check command
+	}
+
+	return cmd.Run(globals)
 }
 
 // CompletionCmd handles the completion command for generating shell completions
