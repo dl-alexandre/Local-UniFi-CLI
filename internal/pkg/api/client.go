@@ -30,7 +30,7 @@ func (c *Client) retryWithBackoff(operation func() error, maxRetries int, operat
 		// Check if it's a rate limit error
 		if isRateLimitError(err) {
 			if attempt < maxRetries-1 {
-				backoffDuration := time.Duration(1<<attempt) * 2 * time.Second
+				backoffDuration := time.Duration(InitialBackoffSeconds<<attempt) * time.Second
 				fmt.Printf("Rate limited. Retrying in %d seconds... (attempt %d/%d)\n",
 					int(backoffDuration.Seconds()), attempt+1, maxRetries)
 				time.Sleep(backoffDuration)
@@ -98,7 +98,7 @@ func NewClient(opts ClientOptions) (*Client, error) {
 
 	timeout := time.Duration(opts.Timeout) * time.Second
 	if opts.Timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = DefaultTimeout()
 	}
 
 	client.SetTimeout(timeout)
@@ -203,7 +203,7 @@ func (c *Client) doRequest(req *resty.Request, endpoint string) (*resty.Response
 		req.SetHeader("X-Csrf-Token", c.csrfToken)
 	}
 
-	maxRetries := 3
+	maxRetries := MaxRetries
 	var lastErr error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -237,7 +237,7 @@ func (c *Client) doRequest(req *resty.Request, endpoint string) (*resty.Response
 		case http.StatusNotFound:
 			return nil, &NotFoundError{Resource: endpoint}
 		case http.StatusTooManyRequests:
-			return nil, &RateLimitError{RetryAfter: 5}
+			return nil, &RateLimitError{RetryAfter: DefaultRetryAfterSeconds}
 		case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable:
 			if attempt < maxRetries-1 {
 				sleepDuration := c.calculateBackoff(attempt)

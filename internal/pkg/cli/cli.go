@@ -444,8 +444,8 @@ func (c *CreateNetworkCmd) Run(g *Globals) error {
 		return &api.ValidationError{Message: "network name is required"}
 	}
 
-	if c.VLAN < 1 || c.VLAN > 4094 {
-		return &api.ValidationError{Message: "VLAN ID must be between 1 and 4094"}
+	if c.VLAN < api.MinVLAN || c.VLAN > api.MaxVLAN {
+		return &api.ValidationError{Message: fmt.Sprintf("VLAN ID must be between %d and %d", api.MinVLAN, api.MaxVLAN)}
 	}
 
 	network := &api.NetworkRequest{
@@ -1371,7 +1371,7 @@ func (c *DeleteUserCmd) Run(g *Globals) error {
 
 	// First try to find user by username if not a valid ID
 	userID := c.UserID
-	if len(c.UserID) != 24 { // MongoDB ObjectID length
+	if len(c.UserID) != api.MongoDBObjectIDLength { // MongoDB ObjectID length
 		// Try to find user by username
 		users, err := g.appClient.ListUsers()
 		if err != nil {
@@ -1432,7 +1432,7 @@ func (c *SetPasswordCmd) Run(g *Globals) error {
 
 	// First try to find user by username if not a valid ID
 	userID := c.User
-	if len(c.User) != 24 { // MongoDB ObjectID length
+	if len(c.User) != api.MongoDBObjectIDLength { // MongoDB ObjectID length
 		// Try to find user by username
 		users, err := g.appClient.ListUsers()
 		if err != nil {
@@ -1579,7 +1579,7 @@ func (c *DownloadBackupCmd) Run(g *Globals) error {
 	// First try to find backup by filename if not a valid ID
 	backupID := c.Backup
 	var backupFilename string
-	if len(c.Backup) != 24 { // MongoDB ObjectID length
+	if len(c.Backup) != api.MongoDBObjectIDLength { // MongoDB ObjectID length
 		// Try to find backup by filename
 		backups, err := g.appClient.ListBackups()
 		if err != nil {
@@ -1628,7 +1628,7 @@ func (c *DownloadBackupCmd) Run(g *Globals) error {
 	}
 
 	// Write to file
-	if err := os.WriteFile(outputPath, data, 0644); err != nil {
+	if err := os.WriteFile(outputPath, data, api.DefaultFilePerms); err != nil {
 		return fmt.Errorf("failed to write backup file: %w", err)
 	}
 
@@ -1657,7 +1657,7 @@ func (c *RestoreBackupCmd) Run(g *Globals) error {
 	// First try to find backup by filename if not a valid ID
 	backupID := c.Backup
 	var backupFilename string
-	if len(c.Backup) != 24 { // MongoDB ObjectID length
+	if len(c.Backup) != api.MongoDBObjectIDLength { // MongoDB ObjectID length
 		// Try to find backup by filename
 		backups, err := g.appClient.ListBackups()
 		if err != nil {
@@ -2013,8 +2013,8 @@ func (c *ListHotspotCmd) Run(g *Globals) error {
 		if displayName == "" {
 			displayName = "-"
 		}
-		if len(displayName) > 18 {
-			displayName = displayName[:15] + "..."
+		if len(displayName) > api.MaxDisplayNameLength {
+			displayName = displayName[:api.MaxTruncatedNameLength] + "..."
 		}
 
 		apName := guest.ApName
@@ -2058,7 +2058,7 @@ func (c *AuthorizeCmd) Run(g *Globals) error {
 	}
 
 	// Validate MAC address format
-	if len(c.MAC) != 17 || strings.Count(c.MAC, ":") != 5 {
+	if len(c.MAC) != api.MACLength || strings.Count(c.MAC, ":") != api.MACSegmentCount {
 		return &api.ValidationError{Message: "invalid MAC address format. Use: aa:bb:cc:dd:ee:ff"}
 	}
 
@@ -2101,7 +2101,7 @@ func (c *UnauthorizeCmd) Run(g *Globals) error {
 	}
 
 	// Validate MAC address format
-	if len(c.MAC) != 17 || strings.Count(c.MAC, ":") != 5 {
+	if len(c.MAC) != api.MACLength || strings.Count(c.MAC, ":") != api.MACSegmentCount {
 		return &api.ValidationError{Message: "invalid MAC address format. Use: aa:bb:cc:dd:ee:ff"}
 	}
 
@@ -2133,7 +2133,7 @@ func (c *KickCmd) Run(g *Globals) error {
 	}
 
 	// Validate MAC address format
-	if len(c.MAC) != 17 || strings.Count(c.MAC, ":") != 5 {
+	if len(c.MAC) != api.MACLength || strings.Count(c.MAC, ":") != api.MACSegmentCount {
 		return &api.ValidationError{Message: "invalid MAC address format. Use: aa:bb:cc:dd:ee:ff"}
 	}
 
@@ -2519,8 +2519,8 @@ func (c *VouchersListCmd) Run(g *Globals) error {
 			}
 		}
 		note := voucher.Note
-		if len(note) > 18 {
-			note = note[:15] + "..."
+		if len(note) > api.MaxTableNoteLength {
+			note = note[:api.MaxTruncatedNoteLength] + "..."
 		}
 		if note == "" {
 			note = "-"
@@ -2911,14 +2911,14 @@ func (c *BandwidthCmd) Run(g *Globals) error {
 	now := time.Now()
 	var start, end int64
 	switch c.Period {
-	case "1h":
-		start = now.Add(-1 * time.Hour).Unix()
-	case "24h":
-		start = now.Add(-24 * time.Hour).Unix()
-	case "7d":
-		start = now.Add(-7 * 24 * time.Hour).Unix()
-	case "30d":
-		start = now.Add(-30 * 24 * time.Hour).Unix()
+	case api.Period1Hour:
+		start = now.Add(-time.Duration(api.Hours1) * time.Hour).Unix()
+	case api.Period24Hour:
+		start = now.Add(-time.Duration(api.Hours24) * time.Hour).Unix()
+	case api.Period7Day:
+		start = now.Add(-time.Duration(api.Days7*api.HoursPerDay) * time.Hour).Unix()
+	case api.Period30Day:
+		start = now.Add(-time.Duration(api.Days30*api.HoursPerDay) * time.Hour).Unix()
 	}
 	end = now.Unix()
 
@@ -3240,11 +3240,11 @@ func (c *WatchCmd) Run(g *Globals) error {
 	}
 
 	// Validate interval
-	if c.Interval < 1 {
-		c.Interval = 1
+	if c.Interval < api.MinWatchIntervalSeconds {
+		c.Interval = api.MinWatchIntervalSeconds
 	}
-	if c.Interval > 300 {
-		c.Interval = 300
+	if c.Interval > api.MaxWatchIntervalSeconds {
+		c.Interval = api.MaxWatchIntervalSeconds
 	}
 
 	// Set up signal handling for graceful shutdown
