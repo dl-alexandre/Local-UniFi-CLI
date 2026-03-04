@@ -1,0 +1,9 @@
+Package: unifi-cli
+Version: 1.1.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: 
+Maintainer: Dalton Alexandre <dalexandre@milcgroup.info>
+Description: UniFi Controller CLI tool
+ Command-line interface for managing UniFi network controllers.

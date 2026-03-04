@@ -7,30 +7,30 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
+      
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.24.0'
-
-      - name: Build all platforms
-        run: make build-all
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      
+      - name: Run tests
+        run: go test ./...
+      
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
         with:
-          files: |
-            dist/unifi-linux-amd64
-            dist/unifi-linux-arm64
-            dist/unifi-darwin-amd64
-            dist/unifi-darwin-arm64
-            dist/unifi-windows-amd64.exe
-          generate_release_notes: true
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_UPDATE_TOKEN: ${{ secrets.TAP_UPDATE_TOKEN }}

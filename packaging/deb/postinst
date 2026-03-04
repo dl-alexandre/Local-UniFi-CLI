@@ -1,0 +1,12 @@
+#!/bin/bash
+# Post-installation script
+set -e
+
+echo "✅ UniFi CLI installed successfully!"
+echo ""
+echo "Next steps:"
+echo "  1. Run 'unifi --help' to see available commands"
+echo "  2. Run 'unifi config init' to set up your configuration"
+echo "  3. Run 'unifi connect' to connect to your UniFi controller"
+echo ""
+echo "For more information, visit: https://github.com/dl-alexandre/Local-UniFi-CLI"

@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  unifi-cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/dl-alexandre/local-unifi-cli:latest
+    container_name: unifi-cli
+    environment:
+      # UniFi Controller Configuration
+      - UNIFI_BASE_URL=${UNIFI_BASE_URL:-https://unifi.local:8443}
+      - UNIFI_USERNAME=${UNIFI_USERNAME:-admin}
+      - UNIFI_PASSWORD=${UNIFI_PASSWORD}
+      - UNIFI_SITE=${UNIFI_SITE:-default}
+      
+      # Optional: Skip TLS verification for self-signed certs
+      - UNIFI_SKIP_TLS_VERIFY=${UNIFI_SKIP_TLS_VERIFY:-true}
+      
+      # Optional: Debug mode
+      - DEBUG=${DEBUG:-false}
+    volumes:
+      # Persist configuration
+      - ./config:/root/.config/unifi
+    network_mode: host
+    # Or use bridge network with port mappings
+    # ports:
+    #   - "8080:8080"
+    stdin_open: true
+    tty: true
+    command: ["--help"]
+
+  # Development service with source mounted
+  unifi-cli-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    image: unifi-cli:dev
+    container_name: unifi-cli-dev
+    volumes:
+      - .:/app
+      - ./config:/root/.config/unifi
+    working_dir: /app
+    command: ["go", "run", "./cmd/unifi", "--help"]
+    environment:
+      - UNIFI_BASE_URL=${UNIFI_BASE_URL}
+      - UNIFI_USERNAME=${UNIFI_USERNAME}
+      - UNIFI_PASSWORD=${UNIFI_PASSWORD}
