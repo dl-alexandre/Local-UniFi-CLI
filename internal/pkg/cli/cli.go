@@ -1416,7 +1416,6 @@ func (c *OptimizeSettingsCmd) Run(g *Globals) error {
 	}
 
 	// Analyze blocking features
-	var issues []string
 	var blockingFeatures []api.FeatureBlockingOffloading
 
 	// Check IPS/IDS
@@ -1428,7 +1427,6 @@ func (c *OptimizeSettingsCmd) Run(g *Globals) error {
 			CanDisable:    true,
 			ImpactOnSpeed: "Reduces throughput to ~300-400 Mbps on UDM Pro",
 		})
-		issues = append(issues, "IPS/IDS is enabled - this disables hardware offloading")
 	}
 
 	// Check hardware offloading status
@@ -1445,7 +1443,6 @@ func (c *OptimizeSettingsCmd) Run(g *Globals) error {
 			CanDisable:    false,
 			ImpactOnSpeed: "Software processing limits speed to ~300-400 Mbps",
 		})
-		issues = append(issues, "Hardware offloading is disabled")
 	}
 
 	// Display results
