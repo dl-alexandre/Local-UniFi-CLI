@@ -728,6 +728,33 @@ func (c *Client) DisableNetwork(siteID, networkID string) error {
 	return nil
 }
 
+// GetNetworkConfig retrieves detailed network configuration including QoS settings
+func (c *Client) GetNetworkConfig(siteID, networkID string) (*NetworkConfigResponse, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/rest/networkconf/%s", c.sitePath(siteID), networkID)
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get network config request failed: %d", resp.StatusCode())
+	}
+
+	var result NetworkConfigResponse
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse network config response: %w", err)
+	}
+
+	return &result, nil
+}
+
 // ListFirewallRules retrieves all firewall rules for a specific site
 func (c *Client) ListFirewallRules(siteID string) (*FirewallRulesResponse, error) {
 	if !c.loggedIn {
@@ -934,6 +961,119 @@ func (c *Client) GetSettings(siteID string) (*SettingsResponse, error) {
 	}
 
 	return &result, nil
+}
+
+// GetSystemSettings retrieves system settings including hardware offloading
+func (c *Client) GetSystemSettings(siteID string) (*SystemSettingsResponse, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/get/setting/mgmt", c.sitePath(siteID))
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get system settings request failed: %d", resp.StatusCode())
+	}
+
+	var result SystemSettingsResponse
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse system settings response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// GetIPSSettings retrieves IPS/IDS settings
+func (c *Client) GetIPSSettings(siteID string) (*SystemSettingsResponse, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/get/setting/ips", c.sitePath(siteID))
+	resp, err := c.httpClient.R().Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get IPS settings request failed: %d", resp.StatusCode())
+	}
+
+	var result SystemSettingsResponse
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse IPS settings response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// DisableIPS disables IPS/IDS to enable hardware offloading
+func (c *Client) DisableIPS(siteID string) error {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/set/setting/ips", c.sitePath(siteID))
+
+	body := map[string]interface{}{
+		"enabled": false,
+	}
+
+	resp, err := c.httpClient.R().
+		SetBody(body).
+		Post(c.apiPath(endpoint))
+
+	if err != nil {
+		return &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("disable IPS request failed: %d", resp.StatusCode())
+	}
+
+	return nil
+}
+
+// EnableHardwareOffloading enables hardware offloading
+func (c *Client) EnableHardwareOffloading(siteID string) error {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/set/setting/mgmt", c.sitePath(siteID))
+
+	body := map[string]interface{}{
+		"hardware_offload_enabled": true,
+		"offload_mode":             "full",
+	}
+
+	resp, err := c.httpClient.R().
+		SetBody(body).
+		Post(c.apiPath(endpoint))
+
+	if err != nil {
+		return &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("enable hardware offloading request failed: %d", resp.StatusCode())
+	}
+
+	return nil
 }
 
 // ListUsers retrieves all local users for the controller

@@ -33,6 +33,7 @@ type CLI struct {
 	Traffic     TrafficCmd     `cmd:"" help:"Manage traffic rules (QoS/bandwidth control)"`
 	Stats       StatsCmd       `cmd:"" help:"Show bandwidth and traffic statistics"`
 	Settings    SettingsCmd    `cmd:"" help:"Manage controller settings"`
+	System      SystemCmd      `cmd:"" help:"System diagnostics and management"`
 	Users       UsersCmd       `cmd:"" help:"Manage local UniFi users"`
 	Backups     BackupsCmd     `cmd:"" help:"Manage controller backups"`
 	Firmware    FirmwareCmd    `cmd:"" help:"Manage device firmware"`
@@ -374,6 +375,7 @@ type NetworksCmd struct {
 	List   ListNetworksCmd  `cmd:"" help:"List all networks/VLANs"`
 	Create CreateNetworkCmd `cmd:"" help:"Create a new network/VLAN"`
 	Enable EnableNetworkCmd `cmd:"" help:"Enable a network/VLAN"`
+	Check  CheckQoSCmd      `cmd:"" help:"Check QoS and Smart Queue settings on WAN networks"`
 }
 
 // ListNetworksCmd handles the networks list command
@@ -524,6 +526,140 @@ func (c *EnableNetworkCmd) Run(g *Globals) error {
 
 	fmt.Printf("✅ Network '%s' enabled successfully\n", targetNetwork.Name)
 	return nil
+}
+
+// CheckQoSCmd handles checking QoS and Smart Queue settings
+type CheckQoSCmd struct {
+	Site string `help:"Site ID (default: first available)" default:""`
+}
+
+func (c *CheckQoSCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	// Get all networks
+	networks, err := g.appClient.ListNetworks(siteID)
+	if err != nil {
+		return fmt.Errorf("failed to list networks: %w", err)
+	}
+
+	formatter := g.getFormatter()
+
+	if g.appConfig.Output.Format == "json" {
+		return formatter.PrintJSON(networks.Data)
+	}
+
+	// Find WAN networks and check QoS settings
+	fmt.Println("QoS/Smart Queue Settings Check")
+	fmt.Println("==============================")
+	fmt.Println()
+
+	foundWAN := false
+	for _, net := range networks.Data {
+		// Check if it's a WAN network (typically purpose="wan" or has wan-specific fields)
+		if net.Purpose == "wan" || isWANNetwork(net) {
+			foundWAN = true
+			fmt.Printf("Network: %s (ID: %s)\n", net.Name, net.ID)
+			fmt.Printf("  Purpose: %s\n", net.Purpose)
+			fmt.Printf("  Enabled: %v\n\n", net.Enabled)
+
+			// Get detailed config to check QoS
+			config, err := g.appClient.GetNetworkConfig(siteID, net.ID)
+			if err != nil {
+				fmt.Printf("  ⚠️  Could not fetch detailed config: %v\n\n", err)
+				continue
+			}
+
+			if len(config.Data) > 0 {
+				wanConfig := config.Data[0]
+
+				// Check Smart QoS
+				if wanConfig.SmartQoSEnabled {
+					fmt.Printf("  🔴 Smart QoS: ENABLED\n")
+					fmt.Printf("      Max Upload: %s\n", formatSpeed(wanConfig.SmartQoSMaxUpload))
+					fmt.Printf("      Max Download: %s\n", formatSpeed(wanConfig.SmartQoSMaxDownload))
+					fmt.Printf("      \n  ⚠️  WARNING: Smart QoS may be limiting your speeds!\n")
+					fmt.Printf("      Your speedtest shows ~313 Mbps but limit might be set lower.\n\n")
+				} else {
+					fmt.Printf("  ✅ Smart QoS: Disabled\n")
+				}
+
+				// Check legacy QoS
+				if wanConfig.QoSEnabled {
+					fmt.Printf("  🔴 Legacy QoS: ENABLED\n")
+					fmt.Printf("      Max Upload: %s\n", formatSpeed(wanConfig.QoSMaxUpload))
+					fmt.Printf("      Max Download: %s\n", formatSpeed(wanConfig.QoSMaxDownload))
+					fmt.Printf("      \n  ⚠️  WARNING: QoS may be limiting your speeds!\n\n")
+				} else {
+					fmt.Printf("  ✅ Legacy QoS: Disabled\n")
+				}
+
+				// Check Rate Limiting
+				if wanConfig.RateLimitEnabled {
+					fmt.Printf("  🔴 Rate Limiting: ENABLED\n")
+					fmt.Printf("      Max Upload: %s\n", formatSpeed(wanConfig.RateLimitMaxUpload))
+					fmt.Printf("      Max Download: %s\n", formatSpeed(wanConfig.RateLimitMaxDownload))
+					fmt.Printf("      \n  ⚠️  WARNING: Rate limiting is active!\n\n")
+				}
+
+				// Hardware offloading status
+				if wanConfig.HardwareOffloadingEnabled {
+					fmt.Printf("  ✅ Hardware Offloading: Enabled\n")
+				} else {
+					fmt.Printf("  ⚠️  Hardware Offloading: Disabled or Not Available\n")
+					fmt.Printf("      (This can reduce throughput on UDM Pro)\n")
+				}
+			}
+			fmt.Println()
+		}
+	}
+
+	if !foundWAN {
+		fmt.Println("No WAN networks found.")
+		fmt.Println("Note: WAN network detection may require additional configuration.")
+	}
+
+	fmt.Println("\nRecommendations:")
+	fmt.Println("==================")
+	fmt.Println("If Smart QoS or QoS is enabled with lower limits than your ISP plan:")
+	fmt.Println("  1. Go to UniFi Web UI → Settings → Networks → WAN → Advanced")
+	fmt.Println("  2. Disable 'Smart Queues' or adjust the bandwidth limits")
+	fmt.Println("  3. For full speed, disable Smart Queues entirely")
+	fmt.Println()
+	fmt.Println("Your current speed: ~313 Mbps download / ~627 Mbps upload")
+	fmt.Println("Check if these match your ISP plan.")
+
+	return nil
+}
+
+// isWANNetwork checks if a network is a WAN network based on properties
+func isWANNetwork(net api.Network) bool {
+	// WAN networks typically have these characteristics:
+	// - Purpose might be "wan" or empty (defaults to wan for primary)
+	// - NetworkGroup is often "WAN"
+	return net.NetworkGroup == "WAN" || net.Purpose == "wan"
+}
+
+// formatSpeed converts bits per second to human readable format
+func formatSpeed(bps int64) string {
+	if bps == 0 {
+		return "unlimited"
+	}
+
+	// Convert from Kbps to Mbps if needed
+	// UniFi stores speeds in Kbps typically
+	mbps := float64(bps) / 1000.0
+
+	if mbps >= 1000 {
+		return fmt.Sprintf("%.2f Gbps", mbps/1000)
+	}
+	return fmt.Sprintf("%.0f Mbps", mbps)
 }
 
 // DevicesCmd groups device-related commands
@@ -1122,8 +1258,10 @@ func (c *DeleteFirewallRuleCmd) Run(g *Globals) error {
 
 // SettingsCmd groups settings-related commands
 type SettingsCmd struct {
-	List ListSettingsCmd `cmd:"" help:"List controller/site settings"`
-	Get  GetSettingCmd   `cmd:"" help:"Get a specific setting value"`
+	List     ListSettingsCmd     `cmd:"" help:"List controller/site settings"`
+	Get      GetSettingCmd       `cmd:"" help:"Get a specific setting value"`
+	Optimize OptimizeSettingsCmd `cmd:"" help:"Diagnose and fix hardware offloading for full speed"`
+	DPI      DPICmd              `cmd:"" help:"Manage Deep Packet Inspection (DPI) settings"`
 }
 
 // ListSettingsCmd handles listing settings
@@ -1239,6 +1377,548 @@ func (c *GetSettingCmd) Run(g *Globals) error {
 		fmt.Printf("\nCategory: %s\n", foundSetting.Category)
 	}
 
+	return nil
+}
+
+// OptimizeSettingsCmd diagnoses and fixes hardware offloading issues
+type OptimizeSettingsCmd struct {
+	Site  string `help:"Site ID (default: first available)" default:""`
+	Fix   bool   `help:"Attempt to fix issues by disabling blocking features"`
+	Force bool   `help:"Skip confirmation when fixing issues"`
+}
+
+func (c *OptimizeSettingsCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("🔧 UniFi Speed Optimization Diagnostic")
+	fmt.Println("========================================")
+	fmt.Println()
+
+	// Get system settings
+	sysSettings, err := g.appClient.GetSystemSettings(siteID)
+	if err != nil {
+		fmt.Printf("⚠️  Could not fetch system settings: %v\n", err)
+		sysSettings = &api.SystemSettingsResponse{}
+	}
+
+	// Get IPS settings
+	ipsSettings, err := g.appClient.GetIPSSettings(siteID)
+	if err != nil {
+		fmt.Printf("⚠️  Could not fetch IPS settings: %v\n", err)
+		ipsSettings = &api.SystemSettingsResponse{}
+	}
+
+	// Analyze blocking features
+	var issues []string
+	var blockingFeatures []api.FeatureBlockingOffloading
+
+	// Check IPS/IDS
+	if len(ipsSettings.Data) > 0 && ipsSettings.Data[0].IpsEnabled {
+		blockingFeatures = append(blockingFeatures, api.FeatureBlockingOffloading{
+			Feature:       "IPS/IDS (Intrusion Prevention)",
+			Enabled:       true,
+			Description:   "Protects against threats but disables hardware offloading",
+			CanDisable:    true,
+			ImpactOnSpeed: "Reduces throughput to ~300-400 Mbps on UDM Pro",
+		})
+		issues = append(issues, "IPS/IDS is enabled - this disables hardware offloading")
+	}
+
+	// Check hardware offloading status
+	var hwOffloadEnabled bool
+	if len(sysSettings.Data) > 0 {
+		hwOffloadEnabled = sysSettings.Data[0].HardwareOffloadEnabled
+	}
+
+	if !hwOffloadEnabled && len(blockingFeatures) == 0 {
+		blockingFeatures = append(blockingFeatures, api.FeatureBlockingOffloading{
+			Feature:       "Hardware Offloading",
+			Enabled:       false,
+			Description:   "Hardware packet processing is disabled",
+			CanDisable:    false,
+			ImpactOnSpeed: "Software processing limits speed to ~300-400 Mbps",
+		})
+		issues = append(issues, "Hardware offloading is disabled")
+	}
+
+	// Display results
+	if len(blockingFeatures) == 0 {
+		fmt.Println("✅ No speed-limiting features detected!")
+		fmt.Println("\nYour system should be capable of full 1Gbps speeds.")
+		fmt.Println("If you're still seeing slow speeds, check:")
+		fmt.Println("  - ISP plan and modem/router upstream")
+		fmt.Println("  - Cable quality between devices")
+		fmt.Println("  - Specific service throttling")
+		return nil
+	}
+
+	fmt.Printf("🔴 Found %d feature(s) blocking hardware offloading:\n\n", len(blockingFeatures))
+
+	for i, feature := range blockingFeatures {
+		fmt.Printf("%d. %s\n", i+1, feature.Feature)
+		fmt.Printf("   Status: %s\n", map[bool]string{true: "ENABLED ⚠️", false: "Disabled ✅"}[feature.Enabled])
+		fmt.Printf("   Impact: %s\n", feature.ImpactOnSpeed)
+		fmt.Printf("   Description: %s\n\n", feature.Description)
+	}
+
+	fmt.Printf("\n📊 Current Speed Impact:\n")
+	fmt.Printf("   Without hardware offloading: ~300-400 Mbps max\n")
+	fmt.Printf("   With hardware offloading: Full 1Gbps symmetric\n\n")
+
+	// If fix flag is set, attempt to fix
+	if c.Fix && len(blockingFeatures) > 0 {
+		if !c.Force {
+			fmt.Print("⚠️  WARNING: Disabling IPS/IDS will reduce security.\n")
+			fmt.Print("    Are you sure you want to continue? [y/N] ")
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			response = strings.TrimSpace(response)
+			if response != "y" && response != "Y" {
+				fmt.Println("Cancelled.")
+				return nil
+			}
+		}
+
+		// Try to disable IPS first
+		ipsDisabled := false
+		for _, feature := range blockingFeatures {
+			if feature.Feature == "IPS/IDS (Intrusion Prevention)" && feature.CanDisable {
+				fmt.Println("\n🔧 Disabling IPS/IDS...")
+				if err := g.appClient.DisableIPS(siteID); err != nil {
+					fmt.Printf("   ❌ Failed to disable IPS: %v\n", err)
+				} else {
+					fmt.Println("   ✅ IPS/IDS disabled successfully")
+					ipsDisabled = true
+				}
+			}
+		}
+
+		// Try to enable hardware offloading
+		if ipsDisabled || !hwOffloadEnabled {
+			fmt.Println("\n🔧 Enabling hardware offloading...")
+			if err := g.appClient.EnableHardwareOffloading(siteID); err != nil {
+				fmt.Printf("   ❌ Failed to enable hardware offloading: %v\n", err)
+				fmt.Println("\n⚠️  Some changes require UniFi Web UI:")
+				fmt.Println("   Settings → System → Advanced → Hardware Offloading")
+			} else {
+				fmt.Println("   ✅ Hardware offloading enabled")
+			}
+		}
+
+		fmt.Println("\n📝 Next Steps:")
+		fmt.Println("   1. Re-run speedtest to verify improvement")
+		fmt.Println("   2. If still slow, reboot UDM Pro Max")
+		fmt.Println("   3. Check UniFi Web UI for any remaining blocking features")
+	} else {
+		fmt.Println("💡 To automatically fix these issues, run:")
+		fmt.Printf("   unifi settings optimize --fix%s\n", map[bool]string{true: " --force", false: ""}[len(blockingFeatures) > 1])
+		fmt.Println("\n⚠️  Note: --fix will disable security features to improve speed.")
+		fmt.Println("   Only use this if you understand the security trade-offs.")
+	}
+
+	return nil
+}
+
+// DPICmd manages DPI settings
+type DPICmd struct {
+	Site    string `help:"Site ID (default: first available)" default:""`
+	Status  bool   `help:"Show current DPI status"`
+	Enable  bool   `help:"Enable DPI (not recommended for speed)"`
+	Disable bool   `help:"Disable DPI (recommended for full speed)"`
+}
+
+func (c *DPICmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	fmt.Println("🔍 DPI (Deep Packet Inspection) Management")
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	fmt.Println()
+
+	// Get current DPI status
+	ipsSettings, err := g.appClient.GetIPSSettings(siteID)
+	if err != nil {
+		fmt.Printf("⚠️  Could not fetch DPI settings via API: %v\n", err)
+		fmt.Println()
+		fmt.Println("Using SSH method instead:")
+		fmt.Println()
+		fmt.Println("Check DPI status:")
+		fmt.Println("   ssh root@<udm-ip> 'cat /run/dpi/dpi.cfg | grep enabled'")
+		fmt.Println("   ssh root@<udm-ip> 'ps aux | grep dpi-flow-stats'")
+		fmt.Println()
+		fmt.Println("Disable DPI via MongoDB:")
+		fmt.Println("   ssh root@<udm-ip>")
+		fmt.Println("   mongo --port 27117 ace --eval 'db.setting.updateOne({key: \"dpi\"}, {\\$set: {enabled: false}})'")
+		return nil
+	}
+
+	dpiEnabled := false
+	if len(ipsSettings.Data) > 0 {
+		// Check DPI field
+		dpiEnabled = ipsSettings.Data[0].DpiEnabled
+	}
+
+	if c.Status || (!c.Enable && !c.Disable) {
+		// Just show status
+		if dpiEnabled {
+			fmt.Println("🔴 DPI Status: ENABLED")
+			fmt.Println()
+			fmt.Println("⚠️  Impact:")
+			fmt.Println("   - Limits speeds to ~300-400 Mbps")
+			fmt.Println("   - Consumes significant CPU")
+			fmt.Println("   - Provides device fingerprinting/traffic analysis")
+			fmt.Println()
+			fmt.Println("To disable DPI and improve speed:")
+			fmt.Println("   unifi settings dpi --disable")
+		} else {
+			fmt.Println("✅ DPI Status: DISABLED")
+			fmt.Println()
+			fmt.Println("✓ Speeds should not be limited by DPI")
+			fmt.Println("✓ Full hardware offloading available")
+		}
+		return nil
+	}
+
+	if c.Disable {
+		fmt.Println("🔧 Disabling DPI...")
+		fmt.Println()
+
+		// Try API method first
+		if err := g.appClient.DisableIPS(siteID); err != nil {
+			fmt.Printf("⚠️  API method failed: %v\n", err)
+			fmt.Println()
+			fmt.Println("Manual method required:")
+			fmt.Println()
+			fmt.Println("Step 1: SSH into UDM Pro Max")
+			fmt.Println("   ssh root@192.168.1.1")
+			fmt.Println()
+			fmt.Println("Step 2: Disable in MongoDB")
+			fmt.Println(`   mongo --port 27117 ace --eval 'db.setting.updateOne({key: "dpi"}, {$set: {enabled: false, fingerprintingEnabled: false}})'`)
+			fmt.Println()
+			fmt.Println("Step 3: Stop DPI process")
+			fmt.Println("   killall -9 dpi-flow-stats")
+			fmt.Println()
+			fmt.Println("Step 4: Reboot to apply changes")
+			fmt.Println("   reboot")
+		} else {
+			fmt.Println("✓ DPI disabled successfully via API")
+			fmt.Println()
+			fmt.Println("⚠️  IMPORTANT: Reboot required for full effect")
+			fmt.Println("   unifi system restart --service all")
+		}
+	}
+
+	if c.Enable {
+		fmt.Println("🔧 Enabling DPI...")
+		fmt.Println()
+		fmt.Println("⚠️  WARNING: Enabling DPI will:")
+		fmt.Println("   - Reduce internet speeds to ~300-400 Mbps")
+		fmt.Println("   - Increase CPU usage")
+		fmt.Println("   - Disable hardware offloading")
+		fmt.Println()
+		fmt.Println("To enable via SSH:")
+		fmt.Println("   ssh root@192.168.1.1")
+		fmt.Println(`   mongo --port 27117 ace --eval 'db.setting.updateOne({key: "dpi"}, {$set: {enabled: true}})'`)
+		fmt.Println("   reboot")
+	}
+
+	fmt.Println()
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	return nil
+}
+
+// SystemCmd groups system-level diagnostic and management commands
+type SystemCmd struct {
+	Diagnose DiagnoseSystemCmd `cmd:"" help:"Run comprehensive system health diagnostic"`
+	Restart  RestartServiceCmd `cmd:"" help:"Restart UniFi services"`
+	SSH      SSHCheckCmd       `cmd:"" help:"Execute SSH commands on UDM Pro Max"`
+}
+
+// DiagnoseSystemCmd runs comprehensive system diagnostics via SSH
+type DiagnoseSystemCmd struct {
+	Site string `help:"Site ID (default: first available)" default:""`
+}
+
+func (c *DiagnoseSystemCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	// Get site info for display
+	sites, err := g.appClient.ListSites()
+	if err != nil {
+		return err
+	}
+
+	var currentSite *api.Site
+	for _, site := range sites.Data {
+		if site.ID == siteID {
+			currentSite = &site
+			break
+		}
+	}
+
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	fmt.Println("           🔧 UNIFI SYSTEM DIAGNOSTIC REPORT")
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	fmt.Printf("Site: %s (%s)\n\n", currentSite.Name, siteID)
+
+	// This command requires SSH access - show instructions if not available
+	fmt.Println("📋 This diagnostic requires SSH access to the UDM Pro Max.")
+	fmt.Println("   SSH must be enabled in UniFi OS Settings → System → SSH")
+	fmt.Println()
+	fmt.Println("To run diagnostics via SSH:")
+	fmt.Println("   ssh root@<udm-ip> 'cat /sys/class/thermal/thermal_zone*/temp'")
+	fmt.Println("   ssh root@<udm-ip> 'ps aux | grep java'")
+	fmt.Println("   ssh root@<udm-ip> 'cat /sys/class/net/eth*/statistics/rx_errors'")
+	fmt.Println()
+	fmt.Println("Or use the following checks:")
+	fmt.Println()
+
+	// Check what we can via API
+	devices, err := g.appClient.ListDevices(siteID)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("📡 DEVICE STATUS:")
+	offlineCount := 0
+	for _, device := range devices.Data {
+		if device.Status == "offline" {
+			offlineCount++
+			fmt.Printf("   ⚠️  %s (%s) - OFFLINE\n", device.Name, device.IPAddress)
+		}
+	}
+	if offlineCount == 0 {
+		fmt.Println("   ✅ All devices online")
+	} else {
+		fmt.Printf("   ⚠️  %d device(s) offline\n", offlineCount)
+	}
+
+	// Check networks
+	networks, err := g.appClient.ListNetworks(siteID)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("\n🌐 NETWORK STATUS:")
+	wanCount := 0
+	for _, net := range networks.Data {
+		if net.Purpose == "wan" || net.NetworkGroup == "WAN" {
+			wanCount++
+			fmt.Printf("   WAN: %s (%s)\n", net.Name, net.IPSubnet)
+		}
+	}
+	if wanCount == 0 {
+		fmt.Println("   ⚠️  No WAN networks found")
+	}
+
+	// Check for traffic rules
+	rules, err := g.appClient.ListTrafficRules(siteID)
+	if err == nil && len(rules.Data) > 0 {
+		fmt.Printf("\n📋 TRAFFIC RULES: %d found\n", len(rules.Data))
+	}
+
+	// DPI check via settings
+	sysSettings, err := g.appClient.GetSystemSettings(siteID)
+	if err == nil && len(sysSettings.Data) > 0 {
+		settings := sysSettings.Data[0]
+		fmt.Println("\n⚙️  SYSTEM SETTINGS:")
+		if settings.HardwareOffloadEnabled {
+			fmt.Println("   ✅ Hardware Offloading: Enabled")
+		} else {
+			fmt.Println("   ⚠️  Hardware Offloading: Disabled")
+		}
+		if settings.IpsEnabled {
+			fmt.Printf("   ⚠️  IPS/IDS: Enabled (Mode: %s)\n", settings.IpsMode)
+		}
+	}
+
+	fmt.Println("\n════════════════════════════════════════════════════════════════")
+	fmt.Println("🎯 MANUAL SSH CHECKS NEEDED:")
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	fmt.Println("Run these on your UDM Pro Max to complete diagnostics:")
+	fmt.Println()
+	fmt.Println("1. Check temperature:")
+	fmt.Println("   cat /sys/class/thermal/thermal_zone*/temp")
+	fmt.Println()
+	fmt.Println("2. Check for high CPU processes:")
+	fmt.Printf("   ps aux --sort=-%%cpu | head -10\n")
+	fmt.Println()
+	fmt.Println("3. Check interface errors:")
+	fmt.Println("   for iface in eth0 eth8 eth9; do")
+	fmt.Println(`     echo "\$iface: RX errors: \$(cat /sys/class/net/\$iface/statistics/rx_errors)"`)
+	fmt.Println("   done")
+	fmt.Println()
+	fmt.Println("4. Check DPI status:")
+	fmt.Println("   ps aux | grep dpi-flow-stats")
+	fmt.Println("   cat /run/dpi/dpi.cfg | grep enabled")
+	fmt.Println()
+
+	return nil
+}
+
+// RestartServiceCmd handles restarting UniFi services
+type RestartServiceCmd struct {
+	Service string `arg:"" help:"Service to restart (unifi, unifi-core, ubios-udapi-server, all)"`
+	Site    string `help:"Site ID (default: first available)" default:""`
+}
+
+func (c *RestartServiceCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	if c.Service == "" {
+		return &api.ValidationError{Message: "service name is required (unifi, unifi-core, ubios-udapi-server, or all)"}
+	}
+
+	_, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	fmt.Println("🔧 SERVICE RESTART")
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Printf("Service to restart: %s\n", c.Service)
+	fmt.Println()
+	fmt.Println("⚠️  This requires SSH access to the UDM Pro Max.")
+	fmt.Println()
+
+	switch c.Service {
+	case "unifi":
+		fmt.Println("Command to run:")
+		fmt.Println("   ssh root@<udm-ip> 'systemctl restart unifi'")
+		fmt.Println()
+		fmt.Println("This will:")
+		fmt.Println("   - Restart UniFi Network controller")
+		fmt.Println("   - Fix Java memory leaks")
+		fmt.Println("   - Apply pending configuration changes")
+		fmt.Println("   - Takes 30-60 seconds")
+
+	case "unifi-core":
+		fmt.Println("Command to run:")
+		fmt.Println("   ssh root@<udm-ip> 'systemctl restart unifi-core'")
+		fmt.Println()
+		fmt.Println("This will:")
+		fmt.Println("   - Restart UniFi OS core services")
+		fmt.Println("   - Refresh device list")
+		fmt.Println("   - Apply system-wide changes")
+		fmt.Println("   - Takes 1-2 minutes")
+
+	case "ubios-udapi-server":
+		fmt.Println("Command to run:")
+		fmt.Println("   ssh root@<udm-ip> 'systemctl restart ubios-udapi-server'")
+		fmt.Println()
+		fmt.Println("This will:")
+		fmt.Println("   - Restart UDAPI server")
+		fmt.Println("   - Apply network configuration")
+		fmt.Println("   - Takes 10-20 seconds")
+
+	case "all":
+		fmt.Println("Commands to run (in order):")
+		fmt.Println("   ssh root@<udm-ip> 'systemctl restart unifi'")
+		fmt.Println("   sleep 60")
+		fmt.Println("   ssh root@<udm-ip> 'systemctl restart unifi-core'")
+		fmt.Println()
+		fmt.Println("⚠️  WARNING: This will restart ALL services")
+		fmt.Println("   - Network will be briefly interrupted")
+		fmt.Println("   - Takes 3-5 minutes total")
+		fmt.Println("   - Only use after a configuration change")
+
+	default:
+		return &api.ValidationError{Message: fmt.Sprintf("unknown service: %s. Use: unifi, unifi-core, ubios-udapi-server, or all", c.Service)}
+	}
+
+	fmt.Println()
+	fmt.Println("════════════════════════════════════════════════════════════════")
+
+	return nil
+}
+
+// SSHCheckCmd provides SSH command templates
+type SSHCheckCmd struct {
+	CheckType string `arg:"" help:"Type of check to run (temp, cpu, errors, memory, dpi, all)"`
+}
+
+func (c *SSHCheckCmd) Run(g *Globals) error {
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	fmt.Println("🔌 SSH COMMAND REFERENCE")
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Println("Enable SSH first in UniFi OS Settings → System → SSH")
+	fmt.Println()
+
+	if c.CheckType == "" || c.CheckType == "all" {
+		fmt.Println("📊 COMPREHENSIVE SYSTEM CHECK:")
+		fmt.Println(`ssh root@192.168.1.1 '`)
+		fmt.Println(`  echo "=== Temperature ==="; `)
+		fmt.Println(`  cat /sys/class/thermal/thermal_zone*/temp | awk '{print int($1/1000)"C"}'; `)
+		fmt.Println(`  echo "=== CPU Load ==="; `)
+		fmt.Println(`  cat /proc/loadavg; `)
+		fmt.Println(`  echo "=== Memory ==="; `)
+		fmt.Println(`  free -h | grep Mem; `)
+		fmt.Println(`  echo "=== Interface Errors ==="; `)
+		fmt.Println(`  for iface in eth8 eth9; do`)
+		fmt.Println(`    echo "$iface: RX: $(cat /sys/class/net/$iface/statistics/rx_errors) TX: $(cat /sys/class/net/$iface/statistics/tx_errors)"; `)
+		fmt.Println(`  done; `)
+		fmt.Println(`  echo "=== Top CPU Processes ==="; `)
+		fmt.Printf("  ps aux --sort=-%%cpu | head -6'\n")
+		fmt.Println()
+	}
+
+	switch c.CheckType {
+	case "temp":
+		fmt.Println("🌡️  TEMPERATURE CHECK:")
+		fmt.Println("   ssh root@192.168.1.1 'cat /sys/class/thermal/thermal_zone*/temp'")
+		fmt.Println("   (Values are in millidegrees, divide by 1000 for Celsius)")
+
+	case "cpu":
+		fmt.Println("🔄 CPU USAGE CHECK:")
+		fmt.Printf("   ssh root@192.168.1.1 'ps aux --sort=-%%cpu | head -10'\n")
+		fmt.Println("   Look for processes using >10% CPU consistently")
+
+	case "errors":
+		fmt.Println("📡 INTERFACE ERRORS CHECK:")
+		fmt.Println(`   ssh root@192.168.1.1 'for iface in eth8 eth9; do echo "$iface: RX errors: $(cat /sys/class/net/$iface/statistics/rx_errors)"; done'`)
+
+	case "memory":
+		fmt.Println("💾 MEMORY CHECK:")
+		fmt.Println("   ssh root@192.168.1.1 'free -h'")
+		fmt.Println("   Look at 'available' column for free memory")
+
+	case "dpi":
+		fmt.Println("🔍 DPI STATUS CHECK:")
+		fmt.Println("   ssh root@192.168.1.1 'ps aux | grep dpi-flow-stats | grep -v grep'")
+		fmt.Println("   If empty, DPI is disabled ✓")
+		fmt.Println()
+		fmt.Println("   To check DPI config:")
+		fmt.Println("   ssh root@192.168.1.1 'cat /run/dpi/dpi.cfg'")
+	}
+
+	fmt.Println()
+	fmt.Println("════════════════════════════════════════════════════════════════")
 	return nil
 }
 

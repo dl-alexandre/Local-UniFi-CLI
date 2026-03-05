@@ -135,6 +135,46 @@ type NetworkRequest struct {
 	Enabled      bool   `json:"enabled"`
 }
 
+// NetworkConfig represents detailed network configuration including QoS settings
+type NetworkConfig struct {
+	ID             string `json:"_id"`
+	Name           string `json:"name"`
+	Purpose        string `json:"purpose"` // "corporate", "guest", "vlan-only", "wan"
+	IPSubnet       string `json:"ip_subnet,omitempty"`
+	NetworkGroup   string `json:"networkgroup,omitempty"`
+	Enabled        bool   `json:"enabled"`
+	IsGuest        bool   `json:"is_guest,omitempty"`
+	VLANEnabled    bool   `json:"vlan_enabled,omitempty"`
+	VLAN           int    `json:"vlan,omitempty"`
+	WANIP          string `json:"wan_ip,omitempty"`
+	WanType        string `json:"wan_type,omitempty"` // "static", "dhcp", "pppoe"
+	WanLoadBalance string `json:"wan_load_balance,omitempty"`
+	WanDNS1        string `json:"wan_dns1,omitempty"`
+	WanDNS2        string `json:"wan_dns2,omitempty"`
+	WanGateway     string `json:"wan_gateway,omitempty"`
+	// QoS / Smart Queue settings
+	SmartQoSEnabled      bool  `json:"smart_qos_enabled,omitempty"`
+	SmartQoSMaxUpload    int64 `json:"smart_qos_max_upload,omitempty"`
+	SmartQoSMaxDownload  int64 `json:"smart_qos_max_download,omitempty"`
+	QoSEnabled           bool  `json:"qos_enabled,omitempty"`
+	QoSMaxUpload         int64 `json:"qos_max_upload,omitempty"`
+	QoSMaxDownload       int64 `json:"qos_max_download,omitempty"`
+	RateLimitEnabled     bool  `json:"rate_limit_enabled,omitempty"`
+	RateLimitMaxUpload   int64 `json:"rate_limit_max_upload,omitempty"`
+	RateLimitMaxDownload int64 `json:"rate_limit_max_download,omitempty"`
+	// Advanced settings
+	HardwareOffloadingEnabled bool   `json:"hardware_offloading_enabled,omitempty"`
+	OffloadMode               string `json:"offload_mode,omitempty"`
+	// Raw for additional fields
+	Raw json.RawMessage `json:"-"`
+}
+
+// NetworkConfigResponse wraps a single network configuration
+type NetworkConfigResponse struct {
+	Meta Meta            `json:"meta"`
+	Data []NetworkConfig `json:"data"`
+}
+
 // FirewallRule represents a UniFi firewall rule
 type FirewallRule struct {
 	ID                  string   `json:"_id"`
@@ -481,4 +521,40 @@ type BandwidthReportResponse struct {
 type HourlyReportResponse struct {
 	Meta Meta           `json:"meta"`
 	Data []HourlyReport `json:"data"`
+}
+
+// SystemSettings represents system-wide settings including hardware offloading
+type SystemSettings struct {
+	ID                     string `json:"_id,omitempty"`
+	Key                    string `json:"key,omitempty"`
+	SiteID                 string `json:"site_id,omitempty"`
+	AutoUpgradeEnabled     bool   `json:"autoupgrade_enabled,omitempty"`
+	HardwareOffloadEnabled bool   `json:"hardware_offload_enabled,omitempty"`
+	OffloadMode            string `json:"offload_mode,omitempty"` // "off", "full", "partial"
+	// IPS/IDS settings
+	IpsEnabled                  bool   `json:"ips_enabled,omitempty"`
+	IpsMode                     string `json:"ips_mode,omitempty"` // "ids", "ips"
+	IpsDbAutoUpdate             bool   `json:"ips_db_auto_update,omitempty"`
+	IpsAdvancedThreatProtection bool   `json:"ips_advanced_threat_protection,omitempty"`
+	IpsGeoIPFiltering           bool   `json:"ips_geoip_filtering,omitempty"`
+	// Logging settings
+	LoggingEnabled       bool `json:"logging_enabled,omitempty"`
+	RemoteLoggingEnabled bool `json:"remote_syslog_enabled,omitempty"`
+	// DPI settings
+	DpiEnabled bool `json:"dpi_enabled,omitempty"`
+}
+
+// SystemSettingsResponse wraps system settings
+type SystemSettingsResponse struct {
+	Meta Meta             `json:"meta"`
+	Data []SystemSettings `json:"data"`
+}
+
+// FeatureBlockingOffloading represents features that disable hardware offloading
+type FeatureBlockingOffloading struct {
+	Feature       string `json:"feature"`
+	Enabled       bool   `json:"enabled"`
+	Description   string `json:"description"`
+	CanDisable    bool   `json:"can_disable"`
+	ImpactOnSpeed string `json:"impact_on_speed"`
 }

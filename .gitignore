@@ -32,3 +32,6 @@ config.yml
 *.tmp
 *.bak
 .env
+
+# Evaluation/diagnostic reports
+DIAGNOSTICS_REPORT.md
