@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"strings"
 	"time"
 
@@ -73,6 +74,7 @@ type Client struct {
 	isUniFiOS     bool              // Dream Machine/Cloud Key Gen2 use /proxy/network prefix
 	csrfToken     string            // CSRF token for UniFi OS
 	siteNames     map[string]string // Cache of site ID -> site name (for UniFi OS translation)
+	sessionStore  *SessionStore     // Persistent session storage
 }
 
 // ClientOptions contains configuration options for the client
@@ -117,7 +119,11 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		client.SetDebug(true)
 	}
 
-	return &Client{
+	// Initialize session store
+	sessionStore := NewSessionStore("")
+
+	// Create client
+	c := &Client{
 		httpClient:    client,
 		baseURL:       opts.BaseURL,
 		username:      opts.Username,
@@ -129,7 +135,15 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		loggedIn:      false,
 		isUniFiOS:     opts.IsUniFiOS,
 		siteNames:     make(map[string]string),
-	}, nil
+		sessionStore:  sessionStore,
+	}
+
+	// Try to load existing session
+	if err := c.loadSession(); err != nil && opts.Debug {
+		fmt.Printf("Debug: Failed to load session: %v\n", err)
+	}
+
+	return c, nil
 }
 
 // Login authenticates with the local controller
@@ -163,7 +177,79 @@ func (c *Client) Login() error {
 	}
 
 	c.loggedIn = true
+
+	// Save session to disk
+	if err := c.saveSession(); err != nil && c.debug {
+		fmt.Printf("Debug: Failed to save session: %v\n", err)
+	}
+
 	return nil
+}
+
+// loadSession loads a saved session from disk and applies it to the client
+func (c *Client) loadSession() error {
+	if c.sessionStore == nil {
+		return nil
+	}
+
+	session, err := c.sessionStore.LoadSession()
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return nil // No session to load
+	}
+
+	// Check if session is for a different controller
+	if !session.MatchesURL(c.baseURL) {
+		return nil // Session is for different URL
+	}
+
+	// Check if session is expired
+	if session.IsExpired() {
+		c.sessionStore.ClearSession()
+		return nil
+	}
+
+	// Load cookies into cookie jar
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return err
+	}
+
+	cookies := session.ToHTTPCookies()
+	c.httpClient.GetClient().Jar.SetCookies(u, cookies)
+
+	// Restore CSRF token
+	if session.CSRFToken != "" {
+		c.csrfToken = session.CSRFToken
+	}
+
+	c.loggedIn = true
+	return nil
+}
+
+// saveSession saves the current session to disk
+func (c *Client) saveSession() error {
+	if c.sessionStore == nil {
+		return nil
+	}
+
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return err
+	}
+
+	cookies := c.httpClient.GetClient().Jar.Cookies(u)
+	return c.sessionStore.SaveSession(c.baseURL, cookies, c.csrfToken)
+}
+
+// ClearSession removes the saved session
+func (c *Client) ClearSession() error {
+	if c.sessionStore == nil {
+		return nil
+	}
+	return c.sessionStore.ClearSession()
 }
 
 // apiPath returns the correct API path, adding /proxy/network prefix for UniFi OS controllers
