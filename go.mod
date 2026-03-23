@@ -6,7 +6,7 @@ require (
 	github.com/alecthomas/kong v1.10.0
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/mattn/go-isatty v0.0.20
-	github.com/rodaine/table v1.3.0
+	github.com/rodaine/table v1.3.1
 	github.com/spf13/viper v1.20.1
 )
 
