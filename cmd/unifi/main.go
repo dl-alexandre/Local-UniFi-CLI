@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"time"
 
-	"github.com/dl-alexandre/Local-UniFi-CLI/internal/cache"
+	"github.com/dl-alexandre/cli-tools/cache"
 	updater "github.com/dl-alexandre/Local-UniFi-CLI/internal/cli"
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/cli"
 	cliver "github.com/dl-alexandre/cli-tools/version"
@@ -20,8 +20,7 @@ var (
 func main() {
 	cliver.BinaryName = "unifi"
 
-	cacheDir := filepath.Join(os.Getenv("HOME"), ".unifi", "cache")
-	cacheInstance := cache.New(cacheDir, 24)
+	cacheInstance := cache.New(cache.DefaultDir("unifi"), 24*time.Hour)
 
 	updater.AutoUpdateCheck(cacheInstance)
 
