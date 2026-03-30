@@ -1,5 +1,4 @@
 # GoReleaser configuration for Local UniFi CLI
-# Documentation: https://goreleaser.com
 
 version: 2
 
@@ -45,7 +44,7 @@ archives:
 
 checksum:
   name_template: "checksums.txt"
-  algorithm: sha256
+  algorithm: blake3
 
 changelog:
   sort: asc
@@ -67,7 +66,44 @@ release:
   prerelease: auto
   name_template: "v{{.Version}}"
 
-# Scoop configuration for Windows
+brews:
+  - name: unifi
+    repository:
+      owner: dl-alexandre
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      branch: master
+      pull_request:
+        enabled: false
+    commit_author:
+      name: goreleaserbot
+      email: bot@dl-alexandre.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    directory: Formula
+    description: "CLI for local UniFi controller management"
+    homepage: "https://github.com/dl-alexandre/Local-UniFi-CLI"
+    license: "MIT"
+    skip_upload: "{{ if index .Env \"HOMEBREW_TAP_TOKEN\" }}false{{ else }}true{{ end }}"
+    test: |
+      system "#{bin}/unifi", "version"
+    install: |
+      bin.install "unifi"
+
+flatpak:
+  - app_id: net.ddns.dl-alexandre.UnifiCLI
+    runtime: org.freedesktop.Platform
+    runtime_version: "24.08"
+    sdk: org.freedesktop.Sdk
+    finish_args:
+      - --share=network
+      - --filesystem=home
+
+srpm:
+  enabled: true
+  summary: "CLI for local UniFi controller management"
+  license: MIT
+  url: https://github.com/dl-alexandre/Local-UniFi-CLI
+
 scoops:
   - repository:
       owner: dl-alexandre
@@ -78,7 +114,7 @@ scoops:
         enabled: false
     commit_author:
       name: goreleaserbot
-      email: goreleaser@carlosbecker.com
+      email: bot@dl-alexandre.com
     commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
     directory: bucket
     description: "CLI for local UniFi controller management"
