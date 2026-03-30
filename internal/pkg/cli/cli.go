@@ -17,6 +17,7 @@ import (
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/api"
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/config"
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/output"
+	"github.com/dl-alexandre/cli-tools/version"
 )
 
 // CLI is the main command-line interface structure using Kong
@@ -3773,11 +3774,7 @@ type VersionCmd struct {
 }
 
 func (c *VersionCmd) Run(g *Globals) error {
-	version := "dev"
-	gitCommit := "unknown"
-	buildTime := "unknown"
-
-	output.PrintVersion(version, gitCommit, buildTime, c.Check)
+	output.PrintVersion(version.Version, version.GitCommit, version.BuildTime, c.Check)
 	return nil
 }
 

@@ -1,19 +1,28 @@
 package cli
 
-// Build-time variables (set by GoReleaser or build flags)
+import (
+	"github.com/dl-alexandre/cli-tools/version"
+)
+
+// Build-time variables (re-exported from cli-tools/version for backward compatibility)
 var (
 	// Version is the current version of the CLI
-	Version = "dev"
+	Version = version.Version
 
 	// BinaryName is the name of the binary
-	BinaryName = "unifi"
+	BinaryName = version.BinaryName
 
 	// GitHubRepo is the GitHub repository name
 	GitHubRepo = "Local-UniFi-CLI"
 
 	// GitCommit is the git commit hash
-	GitCommit = "unknown"
+	GitCommit = version.GitCommit
 
 	// BuildTime is the build timestamp
-	BuildTime = "unknown"
+	BuildTime = version.BuildTime
 )
+
+func init() {
+	// Set CLI-specific metadata
+	version.BinaryName = "unifi"
+}
