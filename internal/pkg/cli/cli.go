@@ -54,8 +54,9 @@ type CLI struct {
 // Globals contains global flags available to all commands
 type Globals struct {
 	BaseURL            string `help:"Controller base URL" env:"UNIFI_BASE_URL"`
-	Username           string `help:"Username for authentication" env:"UNIFI_USERNAME"`
-	Password           string `help:"Password for authentication" env:"UNIFI_PASSWORD"`
+	Username           string `help:"Username for authentication (deprecated, use API key)" env:"UNIFI_USERNAME"`
+	Password           string `help:"Password for authentication (deprecated, use API key)" env:"UNIFI_PASSWORD"`
+	APIKey             string `help:"API Key for authentication (recommended for UniFi OS 3.x+)" env:"UNIFI_API_KEY"`
 	Timeout            int    `help:"Request timeout in seconds" default:"30" env:"UNIFI_TIMEOUT"`
 	Format             string `help:"Output format: table, json" default:"table" enum:"table,json" env:"UNIFI_FORMAT"`
 	Color              string `help:"Color mode: auto, always, never" default:"auto" enum:"auto,always,never" env:"UNIFI_COLOR"`
@@ -79,6 +80,7 @@ func (g *Globals) initClient() error {
 		BaseURL:    g.BaseURL,
 		Username:   g.Username,
 		Password:   g.Password,
+		APIKey:     g.APIKey,
 		Timeout:    g.Timeout,
 		Format:     g.Format,
 		Color:      g.Color,
@@ -94,15 +96,22 @@ func (g *Globals) initClient() error {
 	}
 	g.appConfig = cfg
 
-	username, password, err := config.GetCredentials(g.Username, g.Password)
-	if err != nil {
-		return err
+	// Get credentials - prefer API key over username/password
+	var username, password, apiKey string
+	if cfg.API.APIKey != "" {
+		apiKey = cfg.API.APIKey
+	} else {
+		username, password, err = config.GetCredentials(g.Username, g.Password)
+		if err != nil {
+			return err
+		}
 	}
 
 	client, err := api.NewClient(api.ClientOptions{
 		BaseURL:            cfg.API.BaseURL,
 		Username:           username,
 		Password:           password,
+		APIKey:             apiKey,
 		Timeout:            cfg.API.Timeout,
 		Verbose:            g.Verbose,
 		Debug:              g.Debug,

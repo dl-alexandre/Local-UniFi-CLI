@@ -22,6 +22,7 @@ type Config struct {
 type APIConfig struct {
 	BaseURL string `mapstructure:"base_url"`
 	Timeout int    `mapstructure:"timeout"`
+	APIKey  string `mapstructure:"api_key"`
 }
 
 // AuthConfig holds authentication configuration (NOT credentials)
@@ -42,6 +43,7 @@ type GlobalFlags struct {
 	BaseURL    string
 	Username   string
 	Password   string
+	APIKey     string
 	Timeout    int
 	Format     string
 	Color      string

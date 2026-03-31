@@ -66,6 +66,7 @@ type Client struct {
 	baseURL       string
 	username      string
 	password      string
+	apiKey        string // UniFi OS 3.x+ API key (preferred)
 	timeout       time.Duration
 	verbose       bool
 	debug         bool
@@ -82,7 +83,8 @@ type ClientOptions struct {
 	BaseURL            string
 	Username           string
 	Password           string
-	Timeout            int // seconds
+	APIKey             string // UniFi OS 3.x+ API key (preferred over username/password)
+	Timeout            int    // seconds
 	Verbose            bool
 	Debug              bool
 	MaxRetryDelay      time.Duration
@@ -128,19 +130,27 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		baseURL:       opts.BaseURL,
 		username:      opts.Username,
 		password:      opts.Password,
+		apiKey:        opts.APIKey,
 		timeout:       timeout,
 		verbose:       opts.Verbose,
 		debug:         opts.Debug,
 		maxRetryDelay: opts.MaxRetryDelay,
-		loggedIn:      false,
+		loggedIn:      opts.APIKey != "", // API key auth doesn't require login
 		isUniFiOS:     opts.IsUniFiOS,
 		siteNames:     make(map[string]string),
 		sessionStore:  sessionStore,
 	}
 
-	// Try to load existing session
-	if err := c.loadSession(); err != nil && opts.Debug {
-		fmt.Printf("Debug: Failed to load session: %v\n", err)
+	// Set API key header if using API key auth (UniFi OS 3.x+)
+	if c.apiKey != "" {
+		client.SetHeader("X-API-KEY", c.apiKey)
+	}
+
+	// Try to load existing session (only for username/password auth)
+	if c.apiKey == "" {
+		if err := c.loadSession(); err != nil && opts.Debug {
+			fmt.Printf("Debug: Failed to load session: %v\n", err)
+		}
 	}
 
 	return c, nil
