@@ -560,36 +560,25 @@ type FeatureBlockingOffloading struct {
 }
 
 // DNSRecord represents a local DNS record (split-horizon DNS override)
-// Matches UniFi v2 API format used by UniFi OS 3.x+ and Network 8.2.93+
+// UniFi v2 API returns these as a direct array, not wrapped in {"data": [...]}
 type DNSRecord struct {
 	ID         string `json:"_id,omitempty"`
-	Key        string `json:"key"`         // hostname/FQDN (e.g., "dash.milcgroup.com")
-	Value      string `json:"value"`       // IP address or target
-	RecordType string `json:"record_type"` // A, AAAA, CNAME, MX, NS, SRV, TXT
-	Enabled    bool   `json:"enabled"`
-	TTL        int    `json:"ttl,omitempty"`      // Time to live in seconds
-	Weight     *int   `json:"weight,omitempty"`   // For SRV records
-	Port       *int   `json:"port,omitempty"`     // For SRV records
-	Priority   *int   `json:"priority,omitempty"` // For MX/SRV records
-}
-
-// DNSRecordsResponse wraps a list of DNS records
-type DNSRecordsResponse struct {
-	Meta Meta        `json:"meta"`
-	Data []DNSRecord `json:"data"`
-}
-
-// DNSRecordResponse wraps a single DNS record
-type DNSRecordResponse struct {
-	Meta Meta      `json:"meta"`
-	Data DNSRecord `json:"data"`
+	Name       string `json:"name,omitempty"`   // hostname/FQDN
+	Record     string `json:"record,omitempty"` // hostname/FQDN (alternative field)
+	IP         string `json:"ip,omitempty"`     // IP address
+	Key        string `json:"key,omitempty"`    // hostname/FQDN (v2 API field)
+	Value      string `json:"value,omitempty"`  // IP or target (v2 API field)
+	RecordType string `json:"record_type,omitempty"`
+	Enabled    bool   `json:"enabled,omitempty"`
 }
 
 // DNSRecordRequest represents a request to create/update a DNS record
 type DNSRecordRequest struct {
-	Key        string `json:"key"`         // hostname/FQDN
-	Value      string `json:"value"`       // IP address or target
-	RecordType string `json:"record_type"` // A, AAAA, CNAME, etc.
+	Name       string `json:"name"`   // hostname/FQDN
+	Record     string `json:"record"` // hostname/FQDN (alternative)
+	IP         string `json:"ip"`     // IP address
+	Key        string `json:"key"`    // hostname/FQDN (v2 API)
+	Value      string `json:"value"`  // IP or target (v2 API)
+	RecordType string `json:"record_type"`
 	Enabled    bool   `json:"enabled"`
-	TTL        int    `json:"ttl,omitempty"`
 }

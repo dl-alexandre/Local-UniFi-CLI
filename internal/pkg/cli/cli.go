@@ -1219,18 +1219,18 @@ func (c *ListDNSCmd) Run(g *Globals) error {
 	formatter := g.getFormatter()
 
 	if g.appConfig.Output.Format == "json" {
-		return formatter.PrintJSON(resp.Data)
+		return formatter.PrintJSON(resp)
 	}
 
-	if len(resp.Data) == 0 {
+	if len(resp) == 0 {
 		fmt.Println("No DNS records found.")
 		fmt.Println("\nTo create a DNS record:")
 		fmt.Println("  unifi dns create dash.milcgroup.com 192.168.1.137")
 		return nil
 	}
 
-	dnsData := make([]output.DNSRecordData, len(resp.Data))
-	for i, record := range resp.Data {
+	dnsData := make([]output.DNSRecordData, len(resp))
+	for i, record := range resp {
 		dnsData[i] = output.DNSRecordData{
 			ID:      record.ID,
 			Key:     record.Key,

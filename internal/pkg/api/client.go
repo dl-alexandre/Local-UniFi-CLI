@@ -2302,8 +2302,8 @@ func (c *Client) dnsRecordEndpoint(siteID string, recordID ...string) string {
 }
 
 // ListDNSRecords retrieves all local DNS records for a site
-// This implements split-horizon DNS for local hostname overrides
-func (c *Client) ListDNSRecords(siteID string) (*DNSRecordsResponse, error) {
+// UniFi v2 API returns a direct array []DNSRecord, not wrapped in {"data": [...]}
+func (c *Client) ListDNSRecords(siteID string) ([]DNSRecord, error) {
 	if !c.loggedIn {
 		if err := c.Login(); err != nil {
 			return nil, err
@@ -2312,8 +2312,9 @@ func (c *Client) ListDNSRecords(siteID string) (*DNSRecordsResponse, error) {
 
 	endpoint := c.dnsRecordEndpoint(siteID)
 
+	var records []DNSRecord
 	resp, err := c.httpClient.R().
-		SetResult(&DNSRecordsResponse{}).
+		SetResult(&records).
 		Get(c.apiPath(endpoint))
 
 	if err != nil {
@@ -2324,11 +2325,11 @@ func (c *Client) ListDNSRecords(siteID string) (*DNSRecordsResponse, error) {
 		return nil, fmt.Errorf("list DNS records request failed: %d", resp.StatusCode())
 	}
 
-	return resp.Result().(*DNSRecordsResponse), nil
+	return records, nil
 }
 
 // CreateDNSRecord creates a new local DNS record (hostname override)
-// This allows internal DNS resolution to differ from public DNS
+// UniFi v2 API returns the created record directly, not wrapped
 func (c *Client) CreateDNSRecord(siteID string, record *DNSRecordRequest) (*DNSRecord, error) {
 	if !c.loggedIn {
 		if err := c.Login(); err != nil {
@@ -2338,9 +2339,10 @@ func (c *Client) CreateDNSRecord(siteID string, record *DNSRecordRequest) (*DNSR
 
 	endpoint := c.dnsRecordEndpoint(siteID)
 
+	var result DNSRecord
 	resp, err := c.httpClient.R().
 		SetBody(record).
-		SetResult(&DNSRecordResponse{}).
+		SetResult(&result).
 		Post(c.apiPath(endpoint))
 
 	if err != nil {
@@ -2351,11 +2353,11 @@ func (c *Client) CreateDNSRecord(siteID string, record *DNSRecordRequest) (*DNSR
 		return nil, fmt.Errorf("create DNS record request failed: %d", resp.StatusCode())
 	}
 
-	result := resp.Result().(*DNSRecordResponse)
-	return &result.Data, nil
+	return &result, nil
 }
 
 // GetDNSRecord retrieves a specific DNS record by ID
+// UniFi v2 API returns the record directly, not wrapped
 func (c *Client) GetDNSRecord(siteID, recordID string) (*DNSRecord, error) {
 	if !c.loggedIn {
 		if err := c.Login(); err != nil {
@@ -2365,8 +2367,9 @@ func (c *Client) GetDNSRecord(siteID, recordID string) (*DNSRecord, error) {
 
 	endpoint := c.dnsRecordEndpoint(siteID, recordID)
 
+	var result DNSRecord
 	resp, err := c.httpClient.R().
-		SetResult(&DNSRecordResponse{}).
+		SetResult(&result).
 		Get(c.apiPath(endpoint))
 
 	if err != nil {
@@ -2377,11 +2380,11 @@ func (c *Client) GetDNSRecord(siteID, recordID string) (*DNSRecord, error) {
 		return nil, fmt.Errorf("get DNS record request failed: %d", resp.StatusCode())
 	}
 
-	result := resp.Result().(*DNSRecordResponse)
-	return &result.Data, nil
+	return &result, nil
 }
 
 // UpdateDNSRecord updates an existing DNS record
+// UniFi v2 API returns the updated record directly, not wrapped
 func (c *Client) UpdateDNSRecord(siteID, recordID string, updates map[string]interface{}) (*DNSRecord, error) {
 	if !c.loggedIn {
 		if err := c.Login(); err != nil {
@@ -2391,9 +2394,10 @@ func (c *Client) UpdateDNSRecord(siteID, recordID string, updates map[string]int
 
 	endpoint := c.dnsRecordEndpoint(siteID, recordID)
 
+	var result DNSRecord
 	resp, err := c.httpClient.R().
 		SetBody(updates).
-		SetResult(&DNSRecordResponse{}).
+		SetResult(&result).
 		Put(c.apiPath(endpoint))
 
 	if err != nil {
@@ -2404,8 +2408,7 @@ func (c *Client) UpdateDNSRecord(siteID, recordID string, updates map[string]int
 		return nil, fmt.Errorf("update DNS record request failed: %d", resp.StatusCode())
 	}
 
-	result := resp.Result().(*DNSRecordResponse)
-	return &result.Data, nil
+	return &result, nil
 }
 
 // DeleteDNSRecord removes a DNS record
