@@ -292,6 +292,11 @@ func (c *Client) doRequest(req *resty.Request, endpoint string) (*resty.Response
 		req.SetHeader("X-Csrf-Token", c.csrfToken)
 	}
 
+	// Ensure Content-Type is set for requests with body (POST/PUT)
+	if req.Body != nil {
+		req.SetHeader("Content-Type", "application/json")
+	}
+
 	maxRetries := MaxRetries
 	var lastErr error
 
