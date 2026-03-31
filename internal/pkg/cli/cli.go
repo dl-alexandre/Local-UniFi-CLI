@@ -18,6 +18,7 @@ import (
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/config"
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/output"
 	"github.com/dl-alexandre/cli-tools/version"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 // CLI is the main command-line interface structure using Kong
@@ -30,6 +31,7 @@ type CLI struct {
 	Networks    NetworksCmd    `cmd:"" help:"Manage networks/VLANs"`
 	Devices     DevicesCmd     `cmd:"" help:"Manage devices"`
 	Clients     ClientsCmd     `cmd:"" help:"Manage clients"`
+	DNS         DNSCmd         `cmd:"" help:"Manage local DNS records (split-horizon DNS)"`
 	Firewall    FirewallCmd    `cmd:"" help:"Manage firewall rules"`
 	Traffic     TrafficCmd     `cmd:"" help:"Manage traffic rules (QoS/bandwidth control)"`
 	Stats       StatsCmd       `cmd:"" help:"Show bandwidth and traffic statistics"`
@@ -141,7 +143,8 @@ func (g *Globals) resolveSiteID(siteID string) (string, error) {
 
 // InitCmd handles the init command
 type InitCmd struct {
-	Force bool `help:"Overwrite existing config"`
+	Force  bool `help:"Overwrite existing config"`
+	NoTest bool `help:"Skip connectivity test"`
 }
 
 func (c *InitCmd) Run(g *Globals) error {
@@ -153,14 +156,27 @@ func (c *InitCmd) Run(g *Globals) error {
 
 	fmt.Println("Local UniFi Controller CLI - Configuration Setup")
 	fmt.Println("================================================")
+	fmt.Println()
 
-	fmt.Print("Controller URL [https://unifi.local]: ")
-	baseURL, _ := reader.ReadString('\n')
-	baseURL = strings.TrimSpace(baseURL)
-	if baseURL == "" {
-		baseURL = "https://unifi.local"
+	// Controller URL with validation
+	var baseURL string
+	for {
+		fmt.Print("Controller URL [https://unifi.local]: ")
+		input, _ := reader.ReadString('\n')
+		baseURL = strings.TrimSpace(input)
+		if baseURL == "" {
+			baseURL = "https://unifi.local"
+		}
+
+		// Validate URL format
+		if err := validateControllerURL(baseURL); err != nil {
+			fmt.Printf("  ⚠️  %v\n", err)
+			continue
+		}
+		break
 	}
 
+	// Username
 	fmt.Print("Username [admin]: ")
 	username, _ := reader.ReadString('\n')
 	username = strings.TrimSpace(username)
@@ -168,27 +184,77 @@ func (c *InitCmd) Run(g *Globals) error {
 		username = "admin"
 	}
 
-	fmt.Print("Default output format [table]: ")
-	format, _ := reader.ReadString('\n')
-	format = strings.TrimSpace(format)
-	if format == "" {
-		format = "table"
-	}
-	if err := output.ValidateFormat(format); err != nil {
-		return err
+	// Password (secure input)
+	fmt.Print("Password (hidden, for testing connection): ")
+	password := readPasswordSecure()
+	if password == "" && !c.NoTest {
+		fmt.Println("  Note: Password is empty. You can set it via UNIFI_PASSWORD environment variable.")
 	}
 
-	fmt.Print("Color mode [auto]: ")
-	color, _ := reader.ReadString('\n')
-	color = strings.TrimSpace(color)
-	if color == "" {
-		color = "auto"
+	// UniFi OS mode
+	fmt.Print("Is this a UniFi OS controller (Dream Machine, Cloud Key Gen2+)? [y/N]: ")
+	isOSInput, _ := reader.ReadString('\n')
+	isUniFiOS := strings.ToLower(strings.TrimSpace(isOSInput)) == "y"
+
+	// Skip TLS verification
+	fmt.Print("Skip TLS certificate verification (for self-signed certs)? [y/N]: ")
+	skipTLSInput, _ := reader.ReadString('\n')
+	skipTLSVerify := strings.ToLower(strings.TrimSpace(skipTLSInput)) == "y"
+
+	// Timeout
+	fmt.Print("Request timeout in seconds [30]: ")
+	timeoutInput, _ := reader.ReadString('\n')
+	timeoutInput = strings.TrimSpace(timeoutInput)
+	timeout := 30
+	if timeoutInput != "" {
+		if t, err := strconv.Atoi(timeoutInput); err == nil && t > 0 {
+			timeout = t
+		} else {
+			fmt.Printf("  ⚠️  Invalid timeout value, using default: 30\n")
+		}
 	}
+
+	// Output format with validation
+	var format string
+	for {
+		fmt.Print("Default output format (table/json) [table]: ")
+		input, _ := reader.ReadString('\n')
+		format = strings.TrimSpace(input)
+		if format == "" {
+			format = "table"
+		}
+		if err := output.ValidateFormat(format); err != nil {
+			fmt.Printf("  ⚠️  %v\n", err)
+			continue
+		}
+		break
+	}
+
+	// Color mode with validation
+	var color string
+	for {
+		fmt.Print("Color mode (auto/always/never) [auto]: ")
+		input, _ := reader.ReadString('\n')
+		color = strings.TrimSpace(input)
+		if color == "" {
+			color = "auto"
+		}
+		if err := validateColorMode(color); err != nil {
+			fmt.Printf("  ⚠️  %v\n", err)
+			continue
+		}
+		break
+	}
+
+	// No headers
+	fmt.Print("Disable table headers by default? [y/N]: ")
+	noHeadersInput, _ := reader.ReadString('\n')
+	noHeaders := strings.ToLower(strings.TrimSpace(noHeadersInput)) == "y"
 
 	cfg := &config.Config{
 		API: config.APIConfig{
 			BaseURL: baseURL,
-			Timeout: 30,
+			Timeout: timeout,
 		},
 		Auth: config.AuthConfig{
 			Username: username,
@@ -196,15 +262,105 @@ func (c *InitCmd) Run(g *Globals) error {
 		Output: config.OutputConfig{
 			Format:    format,
 			Color:     color,
-			NoHeaders: false,
+			NoHeaders: noHeaders,
 		},
+	}
+
+	// Test connectivity if not disabled
+	if !c.NoTest && password != "" {
+		fmt.Println()
+		fmt.Println("Testing connection...")
+		if err := testConnection(cfg, password, skipTLSVerify, isUniFiOS); err != nil {
+			fmt.Printf("  ⚠️  Connection test failed: %v\n", err)
+			fmt.Println()
+			fmt.Print("Save configuration anyway? [y/N]: ")
+			confirm, _ := reader.ReadString('\n')
+			if strings.ToLower(strings.TrimSpace(confirm)) != "y" {
+				fmt.Println("Configuration not saved.")
+				return nil
+			}
+		} else {
+			fmt.Println("  ✓ Connection test successful!")
+		}
 	}
 
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
+	fmt.Println()
 	output.PrintInitSuccess(config.GetConfigFilePath())
+
+	// Show additional environment variable guidance
+	if isUniFiOS {
+		fmt.Println()
+		fmt.Println("Note: This is a UniFi OS controller. Remember to use:")
+		fmt.Println("  export UNIFI_OS=true")
+	}
+	if skipTLSVerify {
+		fmt.Println()
+		fmt.Println("Note: TLS verification is disabled. Remember to use:")
+		fmt.Println("  export UNIFI_INSECURE=true")
+	}
+
+	return nil
+}
+
+func validateControllerURL(url string) error {
+	if url == "" {
+		return fmt.Errorf("URL cannot be empty")
+	}
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("URL must start with http:// or https://")
+	}
+	return nil
+}
+
+func validateColorMode(mode string) error {
+	switch mode {
+	case "auto", "always", "never":
+		return nil
+	default:
+		return fmt.Errorf("color mode must be 'auto', 'always', or 'never'")
+	}
+}
+
+func readPasswordSecure() string {
+	// Try to use terminal for secure password input
+	if terminal.IsTerminal(int(os.Stdin.Fd())) {
+		bytePassword, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+		if err == nil {
+			fmt.Println()
+			return string(bytePassword)
+		}
+	}
+	// Fallback to regular input (won't be hidden)
+	reader := bufio.NewReader(os.Stdin)
+	password, _ := reader.ReadString('\n')
+	return strings.TrimSpace(password)
+}
+
+func testConnection(cfg *config.Config, password string, insecureSkipVerify, isUniFiOS bool) error {
+	client, err := api.NewClient(api.ClientOptions{
+		BaseURL:            cfg.API.BaseURL,
+		Username:           cfg.Auth.Username,
+		Password:           password,
+		Timeout:            cfg.API.Timeout,
+		Verbose:            false,
+		Debug:              false,
+		InsecureSkipVerify: insecureSkipVerify,
+		IsUniFiOS:          isUniFiOS,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
+
+	// Try to list sites to verify connection
+	_, err = client.ListSites()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1026,6 +1182,264 @@ func (c *UnblockClientCmd) Run(g *Globals) error {
 		return fmt.Errorf("unblock failed: %s", resp.Meta.RC)
 	}
 
+	return nil
+}
+
+// DNSCmd groups DNS-related commands for local hostname overrides
+// This implements split-horizon DNS for internal network resolution
+type DNSCmd struct {
+	List    ListDNSCmd    `cmd:"" help:"List all local DNS records"`
+	Create  CreateDNSCmd  `cmd:"" help:"Create a new DNS record (hostname override)"`
+	Update  UpdateDNSCmd  `cmd:"" help:"Update an existing DNS record"`
+	Delete  DeleteDNSCmd  `cmd:"" help:"Delete a DNS record"`
+	Enable  EnableDNSCmd  `cmd:"" help:"Enable a DNS record"`
+	Disable DisableDNSCmd `cmd:"" help:"Disable a DNS record"`
+}
+
+// ListDNSCmd handles listing DNS records
+type ListDNSCmd struct {
+	Site string `help:"Site ID (default: first available)" default:""`
+}
+
+func (c *ListDNSCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	resp, err := g.appClient.ListDNSRecords(siteID)
+	if err != nil {
+		return err
+	}
+
+	formatter := g.getFormatter()
+
+	if g.appConfig.Output.Format == "json" {
+		return formatter.PrintJSON(resp.Data)
+	}
+
+	if len(resp.Data) == 0 {
+		fmt.Println("No DNS records found.")
+		fmt.Println("\nTo create a DNS record:")
+		fmt.Println("  unifi dns create dash.milcgroup.com 192.168.1.137")
+		return nil
+	}
+
+	dnsData := make([]output.DNSRecordData, len(resp.Data))
+	for i, record := range resp.Data {
+		dnsData[i] = output.DNSRecordData{
+			ID:          record.ID,
+			Hostname:    record.Hostname,
+			IP:          record.IP,
+			Type:        record.RecordType,
+			Enabled:     record.Enabled,
+			Description: record.Description,
+		}
+	}
+
+	formatter.PrintDNSRecordsTable(dnsData)
+	return nil
+}
+
+// CreateDNSCmd handles creating DNS records
+type CreateDNSCmd struct {
+	Site        string `help:"Site ID (default: first available)" default:""`
+	Hostname    string `arg:"" help:"Hostname to resolve (e.g., dash.milcgroup.com)"`
+	IP          string `arg:"" help:"IP address for the hostname (e.g., 192.168.1.137)"`
+	Type        string `help:"Record type: A, AAAA, or CNAME" default:"A" enum:"A,AAAA,CNAME"`
+	Description string `help:"Description for the record"`
+}
+
+func (c *CreateDNSCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	if c.Hostname == "" || c.IP == "" {
+		return &api.ValidationError{Message: "hostname and IP are required"}
+	}
+
+	record := &api.DNSRecordRequest{
+		Hostname:    c.Hostname,
+		IP:          c.IP,
+		RecordType:  c.Type,
+		Enabled:     true,
+		Description: c.Description,
+	}
+
+	result, err := g.appClient.CreateDNSRecord(siteID, record)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("✓ DNS record created successfully\n")
+	fmt.Printf("  ID:       %s\n", result.ID)
+	fmt.Printf("  Hostname: %s\n", result.Hostname)
+	fmt.Printf("  IP:       %s\n", result.IP)
+	fmt.Printf("  Type:     %s\n", result.RecordType)
+	if result.Description != "" {
+		fmt.Printf("  Desc:     %s\n", result.Description)
+	}
+	fmt.Println("\nNote: DNS changes may take a few minutes to propagate.")
+
+	return nil
+}
+
+// UpdateDNSCmd handles updating DNS records
+type UpdateDNSCmd struct {
+	Site        string `help:"Site ID (default: first available)" default:""`
+	RecordID    string `arg:"" help:"DNS record ID to update"`
+	Hostname    string `help:"New hostname"`
+	IP          string `help:"New IP address"`
+	Description string `help:"New description"`
+}
+
+func (c *UpdateDNSCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	if c.RecordID == "" {
+		return &api.ValidationError{Message: "record ID is required"}
+	}
+
+	updates := map[string]interface{}{}
+	if c.Hostname != "" {
+		updates["hostname"] = c.Hostname
+	}
+	if c.IP != "" {
+		updates["ip"] = c.IP
+	}
+	if c.Description != "" {
+		updates["description"] = c.Description
+	}
+
+	if len(updates) == 0 {
+		return &api.ValidationError{Message: "at least one field to update is required (--hostname, --ip, or --description)"}
+	}
+
+	result, err := g.appClient.UpdateDNSRecord(siteID, c.RecordID, updates)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("✓ DNS record updated successfully\n")
+	fmt.Printf("  ID:       %s\n", result.ID)
+	fmt.Printf("  Hostname: %s\n", result.Hostname)
+	fmt.Printf("  IP:       %s\n", result.IP)
+
+	return nil
+}
+
+// DeleteDNSCmd handles deleting DNS records
+type DeleteDNSCmd struct {
+	Site     string `help:"Site ID (default: first available)" default:""`
+	RecordID string `arg:"" help:"DNS record ID to delete"`
+	Force    bool   `help:"Skip confirmation prompt" short:"f"`
+}
+
+func (c *DeleteDNSCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	if c.RecordID == "" {
+		return &api.ValidationError{Message: "record ID is required"}
+	}
+
+	if !c.Force {
+		fmt.Printf("Are you sure you want to delete DNS record %s? [y/N] ", c.RecordID)
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
+		if response != "y" && response != "Y" {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	}
+
+	if err := g.appClient.DeleteDNSRecord(siteID, c.RecordID); err != nil {
+		return err
+	}
+
+	fmt.Printf("✓ DNS record %s deleted\n", c.RecordID)
+	return nil
+}
+
+// EnableDNSCmd handles enabling a DNS record
+type EnableDNSCmd struct {
+	Site     string `help:"Site ID (default: first available)" default:""`
+	RecordID string `arg:"" help:"DNS record ID to enable"`
+}
+
+func (c *EnableDNSCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	if c.RecordID == "" {
+		return &api.ValidationError{Message: "record ID is required"}
+	}
+
+	result, err := g.appClient.EnableDNSRecord(siteID, c.RecordID, true)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("✓ DNS record %s enabled\n", result.Hostname)
+	return nil
+}
+
+// DisableDNSCmd handles disabling a DNS record
+type DisableDNSCmd struct {
+	Site     string `help:"Site ID (default: first available)" default:""`
+	RecordID string `arg:"" help:"DNS record ID to disable"`
+}
+
+func (c *DisableDNSCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	if c.RecordID == "" {
+		return &api.ValidationError{Message: "record ID is required"}
+	}
+
+	result, err := g.appClient.EnableDNSRecord(siteID, c.RecordID, false)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("✓ DNS record %s disabled\n", result.Hostname)
 	return nil
 }
 

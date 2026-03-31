@@ -475,3 +475,47 @@ func (f *Formatter) truncateString(s string, max int) string {
 	}
 	return s[:max-3] + "..."
 }
+
+// DNSRecordData holds DNS record information for table output
+type DNSRecordData struct {
+	ID          string
+	Hostname    string
+	IP          string
+	Type        string
+	Enabled     bool
+	Description string
+}
+
+// PrintDNSRecordsTable outputs DNS records in table format
+func (f *Formatter) PrintDNSRecordsTable(records []DNSRecordData) {
+	if len(records) == 0 {
+		fmt.Println("No DNS records found.")
+		return
+	}
+
+	tbl := table.New("ID", "Hostname", "IP", "Type", "Enabled", "Description").WithWriter(os.Stdout)
+
+	if f.Color && !f.NoHeaders {
+		tbl.WithHeaderFormatter(func(format string, vals ...interface{}) string {
+			return fmt.Sprintf("\033[1m%s\033[0m", fmt.Sprintf(format, vals...))
+		})
+	}
+
+	for _, record := range records {
+		enabled := "✓"
+		if !record.Enabled {
+			enabled = "✗"
+		}
+		if record.Type == "" {
+			record.Type = "A"
+		}
+		if record.Description == "" {
+			record.Description = "-"
+		}
+		tbl.AddRow(record.ID, record.Hostname, record.IP, record.Type, enabled, record.Description)
+	}
+
+	if !f.NoHeaders || f.Color {
+		tbl.Print()
+	}
+}

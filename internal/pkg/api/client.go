@@ -2272,3 +2272,146 @@ func (c *Client) EnableTrafficRule(siteID, ruleID string, enabled bool) (*Traffi
 	result := resp.Result().(*TrafficRuleResponse)
 	return &result.Data, nil
 }
+
+// ============================================
+// DNS Management (Split-Horizon DNS Records)
+// ============================================
+
+// ListDNSRecords retrieves all local DNS records for a site
+// This implements split-horizon DNS for local hostname overrides
+func (c *Client) ListDNSRecords(siteID string) (*DNSRecordsResponse, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	// UniFi uses /rest/dnsrecord for local DNS entries
+	endpoint := fmt.Sprintf("/api/s/%s/rest/dnsrecord", c.sitePath(siteID))
+
+	resp, err := c.httpClient.R().
+		SetResult(&DNSRecordsResponse{}).
+		Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("list DNS records request failed: %d", resp.StatusCode())
+	}
+
+	return resp.Result().(*DNSRecordsResponse), nil
+}
+
+// CreateDNSRecord creates a new local DNS record (hostname override)
+// This allows internal DNS resolution to differ from public DNS
+func (c *Client) CreateDNSRecord(siteID string, record *DNSRecordRequest) (*DNSRecord, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/rest/dnsrecord", c.sitePath(siteID))
+
+	resp, err := c.httpClient.R().
+		SetBody(record).
+		SetResult(&DNSRecordResponse{}).
+		Post(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("create DNS record request failed: %d", resp.StatusCode())
+	}
+
+	result := resp.Result().(*DNSRecordResponse)
+	return &result.Data, nil
+}
+
+// GetDNSRecord retrieves a specific DNS record by ID
+func (c *Client) GetDNSRecord(siteID, recordID string) (*DNSRecord, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/rest/dnsrecord/%s", c.sitePath(siteID), recordID)
+
+	resp, err := c.httpClient.R().
+		SetResult(&DNSRecordResponse{}).
+		Get(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("get DNS record request failed: %d", resp.StatusCode())
+	}
+
+	result := resp.Result().(*DNSRecordResponse)
+	return &result.Data, nil
+}
+
+// UpdateDNSRecord updates an existing DNS record
+func (c *Client) UpdateDNSRecord(siteID, recordID string, updates map[string]interface{}) (*DNSRecord, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/rest/dnsrecord/%s", c.sitePath(siteID), recordID)
+
+	resp, err := c.httpClient.R().
+		SetBody(updates).
+		SetResult(&DNSRecordResponse{}).
+		Put(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("update DNS record request failed: %d", resp.StatusCode())
+	}
+
+	result := resp.Result().(*DNSRecordResponse)
+	return &result.Data, nil
+}
+
+// DeleteDNSRecord removes a DNS record
+func (c *Client) DeleteDNSRecord(siteID, recordID string) error {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/rest/dnsrecord/%s", c.sitePath(siteID), recordID)
+
+	resp, err := c.httpClient.R().
+		Delete(c.apiPath(endpoint))
+
+	if err != nil {
+		return &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("delete DNS record request failed: %d", resp.StatusCode())
+	}
+
+	return nil
+}
+
+// EnableDNSRecord enables or disables a DNS record
+func (c *Client) EnableDNSRecord(siteID, recordID string, enabled bool) (*DNSRecord, error) {
+	return c.UpdateDNSRecord(siteID, recordID, map[string]interface{}{
+		"enabled": enabled,
+	})
+}

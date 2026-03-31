@@ -558,3 +558,39 @@ type FeatureBlockingOffloading struct {
 	CanDisable    bool   `json:"can_disable"`
 	ImpactOnSpeed string `json:"impact_on_speed"`
 }
+
+// DNSRecord represents a local DNS record (split-horizon DNS override)
+type DNSRecord struct {
+	ID          string `json:"_id,omitempty"`
+	SiteID      string `json:"site_id,omitempty"`
+	Hostname    string `json:"hostname"`
+	IP          string `json:"ip"`
+	RecordType  string `json:"record_type,omitempty"` // A, AAAA, CNAME
+	Enabled     bool   `json:"enabled"`
+	Description string `json:"description,omitempty"`
+	TTL         int    `json:"ttl,omitempty"` // Time to live in seconds
+	CreateTime  int64  `json:"create_time,omitempty"`
+	UpdateTime  int64  `json:"update_time,omitempty"`
+}
+
+// DNSRecordsResponse wraps a list of DNS records
+type DNSRecordsResponse struct {
+	Meta Meta        `json:"meta"`
+	Data []DNSRecord `json:"data"`
+}
+
+// DNSRecordResponse wraps a single DNS record
+type DNSRecordResponse struct {
+	Meta Meta      `json:"meta"`
+	Data DNSRecord `json:"data"`
+}
+
+// DNSRecordRequest represents a request to create/update a DNS record
+type DNSRecordRequest struct {
+	Hostname    string `json:"hostname"`
+	IP          string `json:"ip"`
+	RecordType  string `json:"record_type,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	Description string `json:"description,omitempty"`
+	TTL         int    `json:"ttl,omitempty"`
+}
