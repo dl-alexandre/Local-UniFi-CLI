@@ -255,7 +255,7 @@ func (c *Client) ClearSession() error {
 // apiPath returns the correct API path, adding /proxy/network prefix for UniFi OS controllers
 func (c *Client) apiPath(path string) string {
 	if c.isUniFiOS && !strings.HasPrefix(path, "/proxy/") {
-		return "/proxy/network" + path
+		return "/proxy/network/" + path
 	}
 	return path
 }
