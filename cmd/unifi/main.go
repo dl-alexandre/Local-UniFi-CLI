@@ -5,9 +5,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/dl-alexandre/cli-tools/cache"
 	updater "github.com/dl-alexandre/Local-UniFi-CLI/internal/cli"
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/cli"
+	"github.com/dl-alexandre/cli-tools/cache"
 	cliver "github.com/dl-alexandre/cli-tools/version"
 )
 

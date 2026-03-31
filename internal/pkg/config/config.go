@@ -111,6 +111,7 @@ func bindEnvVars(v *viper.Viper) {
 	// Explicit bindings for clarity
 	_ = v.BindEnv("api.base_url", "UNIFI_BASE_URL")
 	_ = v.BindEnv("api.timeout", "UNIFI_TIMEOUT")
+	_ = v.BindEnv("api.api_key", "UNIFI_API_KEY")
 	_ = v.BindEnv("auth.username", "UNIFI_USERNAME")
 }
 
@@ -132,6 +133,9 @@ func applyFlags(v *viper.Viper, flags GlobalFlags) {
 	}
 	if flags.Username != "" {
 		v.Set("auth.username", flags.Username)
+	}
+	if flags.APIKey != "" {
+		v.Set("api.api_key", flags.APIKey)
 	}
 }
 

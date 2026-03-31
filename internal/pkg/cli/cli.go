@@ -1276,10 +1276,10 @@ func (c *CreateDNSCmd) Run(g *Globals) error {
 	}
 
 	// Build request with only the fields UniFi expects (not all possible fields)
-	// UniFi v2 API uses: name/record for hostname, ip for address
+	// UniFi v2 API uses: key for hostname, value for IP address
 	record := map[string]interface{}{
-		"name":        c.Key,
-		"ip":          c.Value,
+		"key":         c.Key,
+		"value":       c.Value,
 		"record_type": c.Type,
 		"enabled":     true,
 	}
