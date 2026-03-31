@@ -2330,7 +2330,8 @@ func (c *Client) ListDNSRecords(siteID string) ([]DNSRecord, error) {
 
 // CreateDNSRecord creates a new local DNS record (hostname override)
 // UniFi v2 API returns the created record directly, not wrapped
-func (c *Client) CreateDNSRecord(siteID string, record *DNSRecordRequest) (*DNSRecord, error) {
+// Accepts interface{} to allow both DNSRecordRequest struct or map[string]interface{}
+func (c *Client) CreateDNSRecord(siteID string, record interface{}) (*DNSRecord, error) {
 	if !c.loggedIn {
 		if err := c.Login(); err != nil {
 			return nil, err

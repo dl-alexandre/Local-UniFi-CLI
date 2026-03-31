@@ -1266,11 +1266,13 @@ func (c *CreateDNSCmd) Run(g *Globals) error {
 		return &api.ValidationError{Message: "hostname and IP are required"}
 	}
 
-	record := &api.DNSRecordRequest{
-		Key:        c.Key,
-		Value:      c.Value,
-		RecordType: c.Type,
-		Enabled:    true,
+	// Build request with only the fields UniFi expects (not all possible fields)
+	// UniFi v2 API uses: name/record for hostname, ip for address
+	record := map[string]interface{}{
+		"name":        c.Key,
+		"ip":          c.Value,
+		"record_type": c.Type,
+		"enabled":     true,
 	}
 
 	result, err := g.appClient.CreateDNSRecord(siteID, record)
