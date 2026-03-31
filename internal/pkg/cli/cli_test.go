@@ -230,6 +230,63 @@ func TestInitCmd_Run_Force(t *testing.T) {
 	}
 }
 
+func TestInitCmd_NoTest(t *testing.T) {
+	cmd := &InitCmd{NoTest: true}
+
+	// Verify NoTest flag is set
+	if !cmd.NoTest {
+		t.Error("InitCmd.NoTest should be true")
+	}
+}
+
+func TestValidateControllerURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{"valid https URL", "https://192.168.1.1", false},
+		{"valid http URL", "http://unifi.local", false},
+		{"valid URL with port", "https://192.168.1.1:8443", false},
+		{"empty URL", "", true},
+		{"missing scheme", "192.168.1.1", true},
+		{"invalid scheme", "ftp://192.168.1.1", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateControllerURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateControllerURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateColorMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		mode    string
+		wantErr bool
+	}{
+		{"auto mode", "auto", false},
+		{"always mode", "always", false},
+		{"never mode", "never", false},
+		{"empty mode", "", true},
+		{"invalid mode", "yes", true},
+		{"mixed case", "Auto", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateColorMode(tt.mode)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateColorMode(%q) error = %v, wantErr %v", tt.mode, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestPingCmd_Run_NoClient(t *testing.T) {
 	cmd := &PingCmd{}
 	g := &Globals{

@@ -1232,12 +1232,11 @@ func (c *ListDNSCmd) Run(g *Globals) error {
 	dnsData := make([]output.DNSRecordData, len(resp.Data))
 	for i, record := range resp.Data {
 		dnsData[i] = output.DNSRecordData{
-			ID:          record.ID,
-			Hostname:    record.Hostname,
-			IP:          record.IP,
-			Type:        record.RecordType,
-			Enabled:     record.Enabled,
-			Description: record.Description,
+			ID:      record.ID,
+			Key:     record.Key,
+			Value:   record.Value,
+			Type:    record.RecordType,
+			Enabled: record.Enabled,
 		}
 	}
 
@@ -1247,11 +1246,10 @@ func (c *ListDNSCmd) Run(g *Globals) error {
 
 // CreateDNSCmd handles creating DNS records
 type CreateDNSCmd struct {
-	Site        string `help:"Site ID (default: first available)" default:""`
-	Hostname    string `arg:"" help:"Hostname to resolve (e.g., dash.milcgroup.com)"`
-	IP          string `arg:"" help:"IP address for the hostname (e.g., 192.168.1.137)"`
-	Type        string `help:"Record type: A, AAAA, or CNAME" default:"A" enum:"A,AAAA,CNAME"`
-	Description string `help:"Description for the record"`
+	Site  string `help:"Site ID (default: first available)" default:""`
+	Key   string `arg:"" help:"Hostname/FQDN to resolve (e.g., dash.milcgroup.com)"`
+	Value string `arg:"" help:"IP address or target (e.g., 192.168.1.137)"`
+	Type  string `help:"Record type: A, AAAA, or CNAME" default:"A" enum:"A,AAAA,CNAME"`
 }
 
 func (c *CreateDNSCmd) Run(g *Globals) error {
@@ -1264,16 +1262,15 @@ func (c *CreateDNSCmd) Run(g *Globals) error {
 		return err
 	}
 
-	if c.Hostname == "" || c.IP == "" {
+	if c.Key == "" || c.Value == "" {
 		return &api.ValidationError{Message: "hostname and IP are required"}
 	}
 
 	record := &api.DNSRecordRequest{
-		Hostname:    c.Hostname,
-		IP:          c.IP,
-		RecordType:  c.Type,
-		Enabled:     true,
-		Description: c.Description,
+		Key:        c.Key,
+		Value:      c.Value,
+		RecordType: c.Type,
+		Enabled:    true,
 	}
 
 	result, err := g.appClient.CreateDNSRecord(siteID, record)
@@ -1282,13 +1279,10 @@ func (c *CreateDNSCmd) Run(g *Globals) error {
 	}
 
 	fmt.Printf("✓ DNS record created successfully\n")
-	fmt.Printf("  ID:       %s\n", result.ID)
-	fmt.Printf("  Hostname: %s\n", result.Hostname)
-	fmt.Printf("  IP:       %s\n", result.IP)
-	fmt.Printf("  Type:     %s\n", result.RecordType)
-	if result.Description != "" {
-		fmt.Printf("  Desc:     %s\n", result.Description)
-	}
+	fmt.Printf("  ID:    %s\n", result.ID)
+	fmt.Printf("  Key:   %s\n", result.Key)
+	fmt.Printf("  Value: %s\n", result.Value)
+	fmt.Printf("  Type:  %s\n", result.RecordType)
 	fmt.Println("\nNote: DNS changes may take a few minutes to propagate.")
 
 	return nil
@@ -1296,11 +1290,10 @@ func (c *CreateDNSCmd) Run(g *Globals) error {
 
 // UpdateDNSCmd handles updating DNS records
 type UpdateDNSCmd struct {
-	Site        string `help:"Site ID (default: first available)" default:""`
-	RecordID    string `arg:"" help:"DNS record ID to update"`
-	Hostname    string `help:"New hostname"`
-	IP          string `help:"New IP address"`
-	Description string `help:"New description"`
+	Site     string `help:"Site ID (default: first available)" default:""`
+	RecordID string `arg:"" help:"DNS record ID to update"`
+	Key      string `help:"New hostname/FQDN"`
+	Value    string `help:"New IP address or target"`
 }
 
 func (c *UpdateDNSCmd) Run(g *Globals) error {
@@ -1318,18 +1311,15 @@ func (c *UpdateDNSCmd) Run(g *Globals) error {
 	}
 
 	updates := map[string]interface{}{}
-	if c.Hostname != "" {
-		updates["hostname"] = c.Hostname
+	if c.Key != "" {
+		updates["key"] = c.Key
 	}
-	if c.IP != "" {
-		updates["ip"] = c.IP
-	}
-	if c.Description != "" {
-		updates["description"] = c.Description
+	if c.Value != "" {
+		updates["value"] = c.Value
 	}
 
 	if len(updates) == 0 {
-		return &api.ValidationError{Message: "at least one field to update is required (--hostname, --ip, or --description)"}
+		return &api.ValidationError{Message: "at least one field to update is required (--key or --value)"}
 	}
 
 	result, err := g.appClient.UpdateDNSRecord(siteID, c.RecordID, updates)
@@ -1338,9 +1328,9 @@ func (c *UpdateDNSCmd) Run(g *Globals) error {
 	}
 
 	fmt.Printf("✓ DNS record updated successfully\n")
-	fmt.Printf("  ID:       %s\n", result.ID)
-	fmt.Printf("  Hostname: %s\n", result.Hostname)
-	fmt.Printf("  IP:       %s\n", result.IP)
+	fmt.Printf("  ID:    %s\n", result.ID)
+	fmt.Printf("  Key:   %s\n", result.Key)
+	fmt.Printf("  Value: %s\n", result.Value)
 
 	return nil
 }
@@ -1410,7 +1400,7 @@ func (c *EnableDNSCmd) Run(g *Globals) error {
 		return err
 	}
 
-	fmt.Printf("✓ DNS record %s enabled\n", result.Hostname)
+	fmt.Printf("✓ DNS record %s enabled\n", result.Key)
 	return nil
 }
 
@@ -1439,7 +1429,7 @@ func (c *DisableDNSCmd) Run(g *Globals) error {
 		return err
 	}
 
-	fmt.Printf("✓ DNS record %s disabled\n", result.Hostname)
+	fmt.Printf("✓ DNS record %s disabled\n", result.Key)
 	return nil
 }
 

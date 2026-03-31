@@ -57,7 +57,32 @@ unifi clients list --site default
 ## Commands
 
 ### `unifi init`
-Interactive configuration setup.
+
+Interactive configuration setup with validation and connectivity testing.
+
+```bash
+# Basic setup with interactive prompts
+unifi init
+
+# Force overwrite existing config
+unifi init --force
+
+# Skip connectivity test
+unifi init --no-test
+```
+
+**Configuration prompts include:**
+- **Controller URL** - Validates format (requires http:// or https://)
+- **Username** - Your UniFi controller username
+- **Password** - Securely masked input (for testing connection, not stored)
+- **UniFi OS Mode** - For Dream Machine, Cloud Key Gen2+ (y/N)
+- **Skip TLS Verification** - For self-signed certificates (y/N)
+- **Request Timeout** - Connection timeout in seconds (default: 30)
+- **Output Format** - table or json (default: table)
+- **Color Mode** - auto, always, or never (default: auto)
+- **Disable Headers** - For table output (y/N)
+
+The init command validates all inputs and optionally tests the connection before saving the configuration.
 
 ### `unifi ping`
 Test connectivity to the controller.

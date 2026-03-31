@@ -2277,6 +2277,27 @@ func (c *Client) EnableTrafficRule(siteID, ruleID string, enabled bool) (*Traffi
 // DNS Management (Split-Horizon DNS Records)
 // ============================================
 
+// dnsRecordEndpoint returns the correct v2 API endpoint for DNS records
+// UniFi OS: /proxy/network/v2/api/site/{site}/static-dns
+// External Controller: /v2/api/site/{site}/static-dns
+func (c *Client) dnsRecordEndpoint(siteID string, recordID ...string) string {
+	var endpoint string
+	if c.isUniFiOS {
+		if len(recordID) > 0 && recordID[0] != "" {
+			endpoint = fmt.Sprintf("v2/api/site/%s/static-dns/%s", c.sitePath(siteID), recordID[0])
+		} else {
+			endpoint = fmt.Sprintf("v2/api/site/%s/static-dns", c.sitePath(siteID))
+		}
+	} else {
+		if len(recordID) > 0 && recordID[0] != "" {
+			endpoint = fmt.Sprintf("/v2/api/site/%s/static-dns/%s", c.sitePath(siteID), recordID[0])
+		} else {
+			endpoint = fmt.Sprintf("/v2/api/site/%s/static-dns", c.sitePath(siteID))
+		}
+	}
+	return endpoint
+}
+
 // ListDNSRecords retrieves all local DNS records for a site
 // This implements split-horizon DNS for local hostname overrides
 func (c *Client) ListDNSRecords(siteID string) (*DNSRecordsResponse, error) {
@@ -2286,8 +2307,7 @@ func (c *Client) ListDNSRecords(siteID string) (*DNSRecordsResponse, error) {
 		}
 	}
 
-	// UniFi uses /rest/dnsrecord for local DNS entries
-	endpoint := fmt.Sprintf("/api/s/%s/rest/dnsrecord", c.sitePath(siteID))
+	endpoint := c.dnsRecordEndpoint(siteID)
 
 	resp, err := c.httpClient.R().
 		SetResult(&DNSRecordsResponse{}).
@@ -2313,7 +2333,7 @@ func (c *Client) CreateDNSRecord(siteID string, record *DNSRecordRequest) (*DNSR
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/dnsrecord", c.sitePath(siteID))
+	endpoint := c.dnsRecordEndpoint(siteID)
 
 	resp, err := c.httpClient.R().
 		SetBody(record).
@@ -2340,7 +2360,7 @@ func (c *Client) GetDNSRecord(siteID, recordID string) (*DNSRecord, error) {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/dnsrecord/%s", c.sitePath(siteID), recordID)
+	endpoint := c.dnsRecordEndpoint(siteID, recordID)
 
 	resp, err := c.httpClient.R().
 		SetResult(&DNSRecordResponse{}).
@@ -2366,7 +2386,7 @@ func (c *Client) UpdateDNSRecord(siteID, recordID string, updates map[string]int
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/dnsrecord/%s", c.sitePath(siteID), recordID)
+	endpoint := c.dnsRecordEndpoint(siteID, recordID)
 
 	resp, err := c.httpClient.R().
 		SetBody(updates).
@@ -2393,7 +2413,7 @@ func (c *Client) DeleteDNSRecord(siteID, recordID string) error {
 		}
 	}
 
-	endpoint := fmt.Sprintf("/api/s/%s/rest/dnsrecord/%s", c.sitePath(siteID), recordID)
+	endpoint := c.dnsRecordEndpoint(siteID, recordID)
 
 	resp, err := c.httpClient.R().
 		Delete(c.apiPath(endpoint))

@@ -478,12 +478,11 @@ func (f *Formatter) truncateString(s string, max int) string {
 
 // DNSRecordData holds DNS record information for table output
 type DNSRecordData struct {
-	ID          string
-	Hostname    string
-	IP          string
-	Type        string
-	Enabled     bool
-	Description string
+	ID      string
+	Key     string // hostname/FQDN
+	Value   string // IP or target
+	Type    string
+	Enabled bool
 }
 
 // PrintDNSRecordsTable outputs DNS records in table format
@@ -493,7 +492,7 @@ func (f *Formatter) PrintDNSRecordsTable(records []DNSRecordData) {
 		return
 	}
 
-	tbl := table.New("ID", "Hostname", "IP", "Type", "Enabled", "Description").WithWriter(os.Stdout)
+	tbl := table.New("ID", "Key (Hostname)", "Value", "Type", "Enabled").WithWriter(os.Stdout)
 
 	if f.Color && !f.NoHeaders {
 		tbl.WithHeaderFormatter(func(format string, vals ...interface{}) string {
@@ -509,10 +508,7 @@ func (f *Formatter) PrintDNSRecordsTable(records []DNSRecordData) {
 		if record.Type == "" {
 			record.Type = "A"
 		}
-		if record.Description == "" {
-			record.Description = "-"
-		}
-		tbl.AddRow(record.ID, record.Hostname, record.IP, record.Type, enabled, record.Description)
+		tbl.AddRow(record.ID, record.Key, record.Value, record.Type, enabled)
 	}
 
 	if !f.NoHeaders || f.Color {
