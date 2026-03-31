@@ -88,14 +88,15 @@ brews:
     install: |
       bin.install "unifi"
 
-flatpak:
-  - app_id: net.ddns.dl-alexandre.UnifiCLI
-    runtime: org.freedesktop.Platform
-    runtime_version: "24.08"
-    sdk: org.freedesktop.Sdk
-    finish_args:
-      - --share=network
-      - --filesystem=home
+# Flatpak disabled - requires flatpak-builder which isn't in GitHub Actions
+# flatpak:
+#   - app_id: net.ddns.dl-alexandre.UnifiCLI
+#     runtime: org.freedesktop.Platform
+#     runtime_version: "24.08"
+#     sdk: org.freedesktop.Sdk
+#     finish_args:
+#       - --share=network
+#       - --filesystem=home
 
 # SRPM disabled - causes "no source archives found" error
 # srpm:
