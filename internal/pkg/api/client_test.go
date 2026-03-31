@@ -2135,7 +2135,7 @@ func TestClient_apiPath_UniFiOSMode(t *testing.T) {
 		{
 			name:     "empty path gets proxy prefix",
 			input:    "",
-			expected: "/proxy/network",
+			expected: "/proxy/network/",
 		},
 		{
 			name:     "path with existing proxy prefix not double-added",
