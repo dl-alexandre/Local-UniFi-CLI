@@ -36,7 +36,7 @@ builds:
 archives:
   - id: unifi
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
-    format: tar.gz
+    formats: [tar.gz]
     files:
       - LICENSE
       - README.md
