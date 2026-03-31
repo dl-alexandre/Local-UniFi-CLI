@@ -99,9 +99,6 @@ flatpak:
 
 srpm:
   enabled: true
-  summary: "CLI for local UniFi controller management"
-  license: MIT
-  url: https://github.com/dl-alexandre/Local-UniFi-CLI
 
 scoops:
   - repository:
