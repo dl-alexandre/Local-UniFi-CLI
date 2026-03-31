@@ -97,8 +97,9 @@ flatpak:
       - --share=network
       - --filesystem=home
 
-srpm:
-  enabled: true
+# SRPM disabled - causes "no source archives found" error
+# srpm:
+#   enabled: true
 
 scoops:
   - repository:
