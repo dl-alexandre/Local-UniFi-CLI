@@ -10,7 +10,7 @@ _unifi_completion() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     
     # Main commands
-    local commands="init ping sites networks devices clients firewall settings users backups firmware port hotspot version completion"
+    local commands="init ping sites networks devices clients firewall settings users backups firmware port hotspot wlan version completion"
     
     # Global flags
     local global_flags="--base-url --username --password --timeout --format --color --no-headers --verbose --debug --config-file --help"
@@ -62,6 +62,9 @@ _unifi_completion() {
             ;;
         hotspot)
             COMPREPLY=( $(compgen -W "list authorize unauthorize kick --duration --help" -- ${cur}) )
+            ;;
+        wlan)
+            COMPREPLY=( $(compgen -W "list create enable disable set-pass delete --site --password --network --guest --security --hide-ssid --band --help" -- ${cur}) )
             ;;
         completion)
             COMPREPLY=( $(compgen -W "${completion_shells}" -- ${cur}) )

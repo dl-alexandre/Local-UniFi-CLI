@@ -397,19 +397,35 @@ type WLANResponse struct {
 	Data WLAN `json:"data"`
 }
 
-// WLANRequest wraps WLAN update request
+// WLANRequest wraps WLAN create/update request
 type WLANRequest struct {
-	Name             string `json:"name,omitempty"`
-	Enabled          bool   `json:"enabled,omitempty"`
-	Security         string `json:"security,omitempty"`
-	Passphrase       string `json:"x_passphrase,omitempty"`
-	UserGroup        string `json:"usergroup_id,omitempty"`
-	VLAN             int    `json:"vlan,omitempty"`
-	IsGuest          bool   `json:"is_guest,omitempty"`
-	HideSSID         bool   `json:"hide_ssid,omitempty"`
-	BandSteeringMode string `json:"bandsteering_mode,omitempty"`
-	AirtimeFairness  bool   `json:"atf_enabled,omitempty"`
-	OptimizeIoTWifi  bool   `json:"optimize_iot_wifi_connectivity,omitempty"`
+	Name                    string `json:"name,omitempty"`
+	Enabled                 bool   `json:"enabled,omitempty"`
+	Security                string `json:"security,omitempty"` // "wpapsk", "wpapsk2", "wpa3", "open"
+	Passphrase              string `json:"x_passphrase,omitempty"`
+	UserGroup               string `json:"usergroup_id,omitempty"`
+	VLAN                    int    `json:"vlan,omitempty"`
+	IsGuest                 bool   `json:"is_guest,omitempty"`
+	HideSSID                bool   `json:"hide_ssid,omitempty"`
+	NetworkID               string `json:"networkconf_id,omitempty"`
+	WPAMode                 string `json:"wpa_mode,omitempty"` // "wpa2", "wpa3"
+	WPAEnc                  string `json:"wpa_enc,omitempty"`  // "ccmp"
+	Band                    string `json:"band,omitempty"`     // "2g", "5g", "both"
+	BandSteeringMode        string `json:"bandsteering_mode,omitempty"`
+	AirtimeFairness         bool   `json:"atf_enabled,omitempty"`
+	OptimizeIoTWifi         bool   `json:"optimize_iot_wifi_connectivity,omitempty"`
+	MACFilterEnabled        bool   `json:"mac_filter_enabled,omitempty"`
+	BCFilterEnabled         bool   `json:"bc_filter_enabled,omitempty"`
+	ScheduleEnabled         bool   `json:"schedule_enabled,omitempty"`
+	UAPSDEnabled            bool   `json:"uapsd_enabled,omitempty"`
+	PMFMode                 string `json:"pmf_mode,omitempty"` // "disabled", "optional", "required"
+	MulticastEnhanceEnabled bool   `json:"mcastenhance_enabled,omitempty"`
+	GroupRekeyInterval      int    `json:"group_rekey_interval,omitempty"`
+	MinimumDataRate         int    `json:"minimum_data_rate,omitempty"`
+	ProxyARP                bool   `json:"proxy_arp,omitempty"`
+	BSSTransition           bool   `json:"bss_transition,omitempty"`
+	RateBeacon              bool   `json:"rate_beacon,omitempty"`
+	RateMulticast           bool   `json:"rate_multicast,omitempty"`
 }
 
 // Voucher represents a hotspot access voucher

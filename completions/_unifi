@@ -39,6 +39,7 @@ _unifi() {
                 'firmware[Manage device firmware]' \
                 'port[Manage switch ports]' \
                 'hotspot[Manage hotspot guests]' \
+                'wlan[Manage wireless networks (SSIDs)]' \
                 'version[Show version information]' \
                 'completion[Generate shell completion scripts]'
             ;;
@@ -156,6 +157,23 @@ _unifi() {
                         'unauthorize[Unauthorize a guest]' \
                         'kick[Kick a guest from the network]' \
                         '(--duration)--duration=[Authorization duration in minutes]' \
+                        '--help[Show help]'
+                    ;;
+                wlan)
+                    _arguments \
+                        'list[List wireless networks]' \
+                        'create[Create a new wireless network]' \
+                        'enable[Enable a wireless network]' \
+                        'disable[Disable a wireless network]' \
+                        'set-pass[Set wireless network password]' \
+                        'delete[Delete a wireless network]' \
+                        '(--site)--site=[Site ID]' \
+                        '(--password)--password=[WiFi password]' \
+                        '(--network)--network=[Network/VLAN name or ID]' \
+                        '(--guest)--guest[Mark as guest network]' \
+                        '(--security)--security=[Security type]:security:(wpapsk wpapsk2 wpa3 open)' \
+                        '(--hide-ssid)--hide-ssid[Hide SSID from broadcast]' \
+                        '(--band)--band=[WiFi band]:band:(2g 5g both)' \
                         '--help[Show help]'
                     ;;
                 completion)

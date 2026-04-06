@@ -3246,6 +3246,7 @@ func (c *KickCmd) Run(g *Globals) error {
 // WlanCmd manages wireless networks (SSIDs)
 type WlanCmd struct {
 	List    WlanListCmd    `cmd:"" help:"List wireless networks"`
+	Create  WlanCreateCmd  `cmd:"" help:"Create a new wireless network (SSID)"`
 	Enable  WlanEnableCmd  `cmd:"" help:"Enable a wireless network"`
 	Disable WlanDisableCmd `cmd:"" help:"Disable a wireless network"`
 	SetPass WlanSetPassCmd `cmd:"" help:"Set wireless network password"`
@@ -3305,6 +3306,112 @@ func (c *WlanListCmd) Run(g *Globals) error {
 			wlan.Security,
 			vlan,
 			guest)
+	}
+	return nil
+}
+
+// WlanCreateCmd handles creating a new wireless network (SSID)
+type WlanCreateCmd struct {
+	Site         string `help:"Site ID (default: first available site)"`
+	Name         string `arg:"" help:"WiFi network name (SSID)"`
+	WifiPassword string `name:"wifi-password" help:"WiFi password (required for secured networks)"`
+	Network      string `help:"Network/VLAN name or ID to associate with this WiFi"`
+	Guest        bool   `help:"Mark as guest network"`
+	Security     string `help:"Security type: wpapsk (WPA2), wpapsk2 (WPA2 only), wpa3 (WPA3), open" default:"wpapsk" enum:"wpapsk,wpapsk2,wpa3,open"`
+	HideSSID     bool   `help:"Hide SSID from broadcast"`
+	Band         string `help:"WiFi band: 2g, 5g, both" default:"both" enum:"2g,5g,both"`
+}
+
+func (c *WlanCreateCmd) Run(g *Globals) error {
+	if err := g.initClient(); err != nil {
+		return err
+	}
+
+	siteID, err := g.resolveSiteID(c.Site)
+	if err != nil {
+		return err
+	}
+
+	// Validate required fields
+	if c.Name == "" {
+		return &api.ValidationError{Message: "WiFi network name (SSID) is required"}
+	}
+
+	// Security validation
+	if c.Security != "open" && c.WifiPassword == "" {
+		return &api.ValidationError{Message: "password is required for secured networks (use --wifi-password)"}
+	}
+
+	// Build the request
+	req := api.WLANRequest{
+		Name:                    c.Name,
+		Enabled:                 true,
+		Security:                c.Security,
+		Passphrase:              c.WifiPassword,
+		IsGuest:                 c.Guest,
+		HideSSID:                c.HideSSID,
+		Band:                    c.Band,
+		MACFilterEnabled:        false,
+		BCFilterEnabled:         false,
+		ScheduleEnabled:         false,
+		UAPSDEnabled:            false,
+		PMFMode:                 "disabled",
+		MulticastEnhanceEnabled: false,
+		GroupRekeyInterval:      3600,
+		MinimumDataRate:         6000,
+		ProxyARP:                false,
+		BSSTransition:           false,
+		RateBeacon:              false,
+		RateMulticast:           false,
+	}
+
+	// Set WPA mode based on security type
+	switch c.Security {
+	case "wpapsk", "wpapsk2":
+		req.WPAMode = "wpa2"
+		req.WPAEnc = "ccmp"
+	case "wpa3":
+		req.WPAMode = "wpa3"
+		req.WPAEnc = "ccmp"
+	}
+
+	// If network is specified, look up the network ID
+	if c.Network != "" {
+		networks, err := g.appClient.ListNetworks(siteID)
+		if err != nil {
+			return fmt.Errorf("failed to list networks: %w", err)
+		}
+
+		var networkID string
+		for _, net := range networks.Data {
+			if net.Name == c.Network || net.ID == c.Network {
+				networkID = net.ID
+				req.VLAN = net.VLAN
+				break
+			}
+		}
+
+		if networkID == "" {
+			return &api.ValidationError{Message: fmt.Sprintf("network '%s' not found", c.Network)}
+		}
+
+		req.NetworkID = networkID
+	}
+
+	// Create the WLAN
+	result, err := g.appClient.CreateWLAN(siteID, req)
+	if err != nil {
+		return fmt.Errorf("failed to create wireless network: %w", err)
+	}
+
+	fmt.Printf("✓ Created wireless network '%s'\n", c.Name)
+	fmt.Printf("  ID: %s\n", result.ID)
+	fmt.Printf("  Security: %s\n", c.Security)
+	if req.VLAN > 0 {
+		fmt.Printf("  VLAN: %d\n", req.VLAN)
+	}
+	if c.Guest {
+		fmt.Printf("  Type: Guest network\n")
 	}
 	return nil
 }
@@ -4651,7 +4758,7 @@ _unifi_completion() {
     local firewall_cmds="list create enable disable delete"
     local traffic_cmds="list enable disable"
     local settings_cmds="list get"
-    local wlan_cmds="list enable disable set-pass delete"
+    local wlan_cmds="list create enable disable set-pass delete"
     local vouchers_cmds="list create delete"
     local completion_shells="bash zsh fish"
     
@@ -4906,11 +5013,18 @@ _unifi() {
                 wlan)
                     _arguments \
                         'list[List wireless networks]' \
+                        'create[Create a new wireless network]' \
                         'enable[Enable a wireless network]' \
                         'disable[Disable a wireless network]' \
                         'set-pass[Set wireless network password]' \
                         'delete[Delete a wireless network]' \
                         '(--site)--site=[Site ID]' \
+                        '(--password)--password=[WiFi password]' \
+                        '(--network)--network=[Network/VLAN name or ID]' \
+                        '(--guest)--guest[Mark as guest network]' \
+                        '(--security)--security=[Security type]:security:(wpapsk wpapsk2 wpa3 open)' \
+                        '(--hide-ssid)--hide-ssid[Hide SSID from broadcast]' \
+                        '(--band)--band=[WiFi band]:band:(2g 5g both)' \
                         '(--force -f)'{-f,--force}'[Skip confirmation prompt]' \
                         '--help[Show help]'
                     ;;
@@ -5116,11 +5230,18 @@ complete -c unifi -n "__fish_seen_subcommand_from hotspot" -l help -d "Show help
 
 # Subcommand: wlan
 complete -c unifi -n "__fish_seen_subcommand_from wlan" -a list -d "List wireless networks"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -a create -d "Create a new wireless network"
 complete -c unifi -n "__fish_seen_subcommand_from wlan" -a enable -d "Enable a wireless network"
 complete -c unifi -n "__fish_seen_subcommand_from wlan" -a disable -d "Disable a wireless network"
 complete -c unifi -n "__fish_seen_subcommand_from wlan" -a set-pass -d "Set wireless network password"
 complete -c unifi -n "__fish_seen_subcommand_from wlan" -a delete -d "Delete a wireless network"
 complete -c unifi -n "__fish_seen_subcommand_from wlan" -l site -d "Site ID"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l password -d "WiFi password"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l network -d "Network/VLAN name or ID"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l guest -d "Mark as guest network"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l security -d "Security type" -a "wpapsk wpapsk2 wpa3 open"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l hide-ssid -d "Hide SSID from broadcast"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l band -d "WiFi band" -a "2g 5g both"
 complete -c unifi -n "__fish_seen_subcommand_from wlan" -l force -s f -d "Skip confirmation prompt"
 complete -c unifi -n "__fish_seen_subcommand_from wlan" -l help -d "Show help"
 

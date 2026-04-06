@@ -31,6 +31,7 @@ complete -c unifi -n "__fish_use_subcommand" -a backups -d "Manage controller ba
 complete -c unifi -n "__fish_use_subcommand" -a firmware -d "Manage device firmware"
 complete -c unifi -n "__fish_use_subcommand" -a port -d "Manage switch ports"
 complete -c unifi -n "__fish_use_subcommand" -a hotspot -d "Manage hotspot guests"
+complete -c unifi -n "__fish_use_subcommand" -a wlan -d "Manage wireless networks (SSIDs)"
 complete -c unifi -n "__fish_use_subcommand" -a version -d "Show version information"
 complete -c unifi -n "__fish_use_subcommand" -a completion -d "Generate shell completion scripts"
 
@@ -146,6 +147,23 @@ complete -c unifi -n "__fish_seen_subcommand_from hotspot" -a unauthorize -d "Un
 complete -c unifi -n "__fish_seen_subcommand_from hotspot" -a kick -d "Kick a guest from the network"
 complete -c unifi -n "__fish_seen_subcommand_from hotspot" -l duration -d "Authorization duration in minutes"
 complete -c unifi -n "__fish_seen_subcommand_from hotspot" -l help -d "Show help"
+
+# Subcommand: wlan
+complete -c unifi -n "__fish_use_subcommand" -a wlan -d "Manage wireless networks (SSIDs)"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -a list -d "List wireless networks"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -a create -d "Create a new wireless network"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -a enable -d "Enable a wireless network"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -a disable -d "Disable a wireless network"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -a set-pass -d "Set wireless network password"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -a delete -d "Delete a wireless network"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l site -d "Site ID"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l password -d "WiFi password"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l network -d "Network/VLAN name or ID"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l guest -d "Mark as guest network"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l security -d "Security type" -a "wpapsk wpapsk2 wpa3 open"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l hide-ssid -d "Hide SSID from broadcast"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l band -d "WiFi band" -a "2g 5g both"
+complete -c unifi -n "__fish_seen_subcommand_from wlan" -l help -d "Show help"
 
 # Subcommand: completion
 complete -c unifi -n "__fish_seen_subcommand_from completion" -a bash -d "Generate bash completions"

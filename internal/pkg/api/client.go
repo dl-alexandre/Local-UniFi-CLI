@@ -1639,6 +1639,32 @@ func (c *Client) KickGuest(mac string) error {
 	return nil
 }
 
+// CreateWLAN creates a new wireless network (SSID)
+func (c *Client) CreateWLAN(siteID string, req WLANRequest) (*WLAN, error) {
+	if !c.loggedIn {
+		if err := c.Login(); err != nil {
+			return nil, err
+		}
+	}
+
+	endpoint := fmt.Sprintf("/api/s/%s/rest/wlanconf", c.sitePath(siteID))
+	resp, err := c.httpClient.R().
+		SetBody(req).
+		SetResult(&WLANResponse{}).
+		Post(c.apiPath(endpoint))
+
+	if err != nil {
+		return nil, &NetworkError{Message: err.Error()}
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("failed to create WLAN: %d", resp.StatusCode())
+	}
+
+	result := resp.Result().(*WLANResponse)
+	return &result.Data, nil
+}
+
 // ListWLANs retrieves all wireless networks for a site
 func (c *Client) ListWLANs(siteID string) (*WLANsResponse, error) {
 	if !c.loggedIn {
