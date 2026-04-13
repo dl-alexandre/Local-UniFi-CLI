@@ -6,7 +6,7 @@ require (
 	github.com/alecthomas/kong v1.14.0
 	github.com/dl-alexandre/cli-tools v0.0.1
 	github.com/go-resty/resty/v2 v2.17.2
-	github.com/mattn/go-isatty v0.0.20
+	github.com/mattn/go-isatty v0.0.21
 	github.com/rodaine/table v1.3.1
 	github.com/spf13/viper v1.21.0
 	golang.org/x/crypto v0.49.0
