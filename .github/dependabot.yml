@@ -1,46 +1,48 @@
 version: 2
+
 updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+      time: "10:00"
+      timezone: "Etc/UTC"
+    groups:
+      go-modules:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "dl-alexandre"
+    assignees:
+      - "dl-alexandre"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
     labels:
       - "dependencies"
       - "go"
-    commit-message:
-      prefix: "chore"
-      include: "scope"
-    reviewers:
-      - "dl-alexandre"
-  
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+      time: "10:15"
+      timezone: "Etc/UTC"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "dl-alexandre"
+    assignees:
+      - "dl-alexandre"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
     labels:
       - "dependencies"
       - "github-actions"
-    commit-message:
-      prefix: "chore"
-      include: "scope"
-    reviewers:
-      - "dl-alexandre"
-  
-  - package-ecosystem: "docker"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "docker"
-    commit-message:
-      prefix: "chore"
-      include: "scope"
-    reviewers:
-      - "dl-alexandre"
