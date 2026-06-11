@@ -42,11 +42,11 @@ func TestCLI_Struct(t *testing.T) {
 	cli := CLI{}
 
 	// Test globals
-	if cli.Globals.BaseURL != "" {
+	if cli.BaseURL != "" {
 		t.Error("Default BaseURL should be empty")
 	}
 
-	if cli.Globals.Timeout != 0 {
+	if cli.Timeout != 0 {
 		t.Error("Default Timeout should be 0 (will be set by defaults)")
 	}
 }
@@ -1688,10 +1688,7 @@ func TestWatchCmd_FilterDevicesByType(t *testing.T) {
 			}
 
 			// Simulate filter logic
-			shouldInclude := true
-			if cmd.Filter != "" && !strings.Contains(strings.ToLower(device.Type), strings.ToLower(cmd.Filter)) {
-				shouldInclude = false
-			}
+			shouldInclude := cmd.Filter == "" || strings.Contains(strings.ToLower(device.Type), strings.ToLower(cmd.Filter))
 
 			if shouldInclude != tt.shouldInclude {
 				t.Errorf("Device inclusion = %v, want %v", shouldInclude, tt.shouldInclude)

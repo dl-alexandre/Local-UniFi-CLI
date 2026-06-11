@@ -15,9 +15,13 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
+// maxRetryAttempts is the number of attempts retryWithBackoff makes on rate limit errors.
+const maxRetryAttempts = 3
+
 // retryWithBackoff executes an operation with exponential backoff retry logic
-// It retries up to maxRetries times on rate limit (403/429) errors
-func (c *Client) retryWithBackoff(operation func() error, maxRetries int, operationName string) error {
+// It retries up to maxRetryAttempts times on rate limit (403/429) errors
+func (c *Client) retryWithBackoff(operation func() error, operationName string) error {
+	const maxRetries = maxRetryAttempts
 	var lastErr error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -217,7 +221,9 @@ func (c *Client) loadSession() error {
 
 	// Check if session is expired
 	if session.IsExpired() {
-		c.sessionStore.ClearSession()
+		if err := c.sessionStore.ClearSession(); err != nil {
+			return fmt.Errorf("failed to clear expired session: %w", err)
+		}
 		return nil
 	}
 
@@ -1855,7 +1861,7 @@ func (c *Client) UpdateWLANSettings(siteID, wlanID string, settings map[string]i
 		return nil
 	}
 
-	return c.retryWithBackoff(operation, 3, "UpdateWLANSettings")
+	return c.retryWithBackoff(operation, "UpdateWLANSettings")
 }
 
 // SetWLANBandSteering sets the band steering mode for a wireless network
@@ -1902,7 +1908,7 @@ func (c *Client) SetWLANBandSteering(siteID, wlanID, mode string) error {
 		return nil
 	}
 
-	return c.retryWithBackoff(operation, 3, "SetWLANBandSteering")
+	return c.retryWithBackoff(operation, "SetWLANBandSteering")
 }
 
 // SetWLANAirtimeFairness enables or disables airtime fairness
@@ -1948,7 +1954,7 @@ func (c *Client) SetWLANAirtimeFairness(siteID, wlanID string, enabled bool) err
 		return nil
 	}
 
-	return c.retryWithBackoff(operation, 3, "SetWLANAirtimeFairness")
+	return c.retryWithBackoff(operation, "SetWLANAirtimeFairness")
 }
 
 // SetWLANIoTOptimization enables or disables IoT WiFi optimization
@@ -1994,7 +2000,7 @@ func (c *Client) SetWLANIoTOptimization(siteID, wlanID string, enabled bool) err
 		return nil
 	}
 
-	return c.retryWithBackoff(operation, 3, "SetWLANIoTOptimization")
+	return c.retryWithBackoff(operation, "SetWLANIoTOptimization")
 }
 
 // ListVouchers retrieves all vouchers for a specific site

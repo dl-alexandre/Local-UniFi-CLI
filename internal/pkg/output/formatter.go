@@ -390,11 +390,12 @@ func (f *Formatter) PrintHealthTable(subsystems []HealthSubsystemData) {
 
 	for _, sub := range subsystems {
 		status := sub.Status
-		if status == "ok" {
+		switch status {
+		case "ok":
 			status = "✓ " + status
-		} else if status == "warning" {
+		case "warning":
 			status = "⚠ " + status
-		} else if status == "error" {
+		case "error":
 			status = "✗ " + status
 		}
 		tbl.AddRow(sub.Subsystem, status, fmt.Sprintf("%d", sub.NumAdopted), fmt.Sprintf("%d", sub.NumDisconnected), fmt.Sprintf("%d", sub.NumPending))

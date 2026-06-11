@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -52,7 +53,8 @@ func TestNewClient(t *testing.T) {
 					t.Errorf("NewClient() expected error but got nil")
 					return
 				}
-				if _, ok := err.(*ValidationError); tt.errType == "ValidationError" && !ok {
+				validationError := &ValidationError{}
+				if tt.errType == "ValidationError" && !errors.As(err, &validationError) {
 					t.Errorf("NewClient() error type = %T, want *ValidationError", err)
 				}
 				return
@@ -126,7 +128,8 @@ func TestClient_Login(t *testing.T) {
 					t.Errorf("Login() expected error but got nil")
 					return
 				}
-				if _, ok := err.(*AuthError); tt.errType == "AuthError" && !ok {
+				authError := &AuthError{}
+				if tt.errType == "AuthError" && !errors.As(err, &authError) {
 					t.Errorf("Login() error type = %T, want *AuthError", err)
 				}
 				return
@@ -183,7 +186,8 @@ func TestClient_Login_MissingCredentials(t *testing.T) {
 				t.Error("Login() expected error for missing credentials but got nil")
 				return
 			}
-			if _, ok := err.(*AuthError); !ok {
+			authError := &AuthError{}
+			if !errors.As(err, &authError) {
 				t.Errorf("Login() error type = %T, want *AuthError", err)
 			}
 		})
@@ -301,7 +305,8 @@ func TestClient_ListSites_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("ListSites() expected error for 404 but got nil")
 	}
-	if _, ok := err.(*NotFoundError); !ok {
+	notFoundError := &NotFoundError{}
+	if !errors.As(err, &notFoundError) {
 		t.Errorf("ListSites() error type = %T, want *NotFoundError", err)
 	}
 }
@@ -329,7 +334,8 @@ func TestClient_ListSites_RateLimited(t *testing.T) {
 	if err == nil {
 		t.Fatal("ListSites() expected error for 429 but got nil")
 	}
-	if _, ok := err.(*RateLimitError); !ok {
+	rateLimitError := &RateLimitError{}
+	if !errors.As(err, &rateLimitError) {
 		t.Errorf("ListSites() error type = %T, want *RateLimitError", err)
 	}
 }
@@ -344,10 +350,10 @@ func TestClient_ListDevices(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/s/default/stat/device":
+		case "/api/s/default/stat/device":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -387,10 +393,10 @@ func TestClient_ListClients(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/s/default/stat/sta":
+		case "/api/s/default/stat/sta":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -431,10 +437,10 @@ func TestClient_GetDevice(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/s/default/stat/device/aa:bb:cc:dd:ee:ff":
+		case "/api/s/default/stat/device/aa:bb:cc:dd:ee:ff":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -474,10 +480,10 @@ func TestClient_GetSiteHealth(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/s/default/stat/health":
+		case "/api/s/default/stat/health":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -598,7 +604,8 @@ func TestClient_NetworkError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Login() expected network error but got nil")
 	}
-	if _, ok := err.(*NetworkError); !ok {
+	networkError := &NetworkError{}
+	if !errors.As(err, &networkError) {
 		t.Errorf("Login() error type = %T, want *NetworkError", err)
 	}
 }
@@ -806,10 +813,10 @@ func TestClient_ListNetworks(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/s/default/rest/networkconf":
+		case "/api/s/default/rest/networkconf":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -918,10 +925,10 @@ func TestClient_ListFirewallRules(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/s/default/rest/firewallrule":
+		case "/api/s/default/rest/firewallrule":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -1189,10 +1196,10 @@ func TestClient_GetSettings(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/s/default/get/setting":
+		case "/api/s/default/get/setting":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -1236,10 +1243,10 @@ func TestClient_ListUsers(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/self/users":
+		case "/api/self/users":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -1479,10 +1486,10 @@ func TestClient_ListBackups(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/self/backups":
+		case "/api/self/backups":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -1778,10 +1785,10 @@ func TestClient_ListFirmware(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/firmware":
+		case "/api/firmware":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -1977,10 +1984,10 @@ func TestClient_ListPorts(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
-		case r.URL.Path == "/api/s/default/stat/device":
+		case "/api/s/default/stat/device":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -2708,7 +2715,8 @@ func TestClient_UniFiOS_ErrorHandling(t *testing.T) {
 	}
 
 	// Verify it's a NotFoundError
-	if _, ok := err.(*NotFoundError); !ok {
+	notFoundError := &NotFoundError{}
+	if !errors.As(err, &notFoundError) {
 		t.Errorf("ListSites() error type = %T, want *NotFoundError", err)
 	}
 }
@@ -2744,11 +2752,11 @@ func TestClient_GetDeviceBandwidthStats(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case r.URL.Path == "/api/s/default/stat/device":
+		case "/api/s/default/stat/device":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -2859,11 +2867,11 @@ func TestClient_GetClientBandwidthStats(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case r.URL.Path == "/api/s/default/stat/sta":
+		case "/api/s/default/stat/sta":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -2967,11 +2975,11 @@ func TestClient_GetDailyReport(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case r.URL.Path == "/api/s/default/stat/report/daily":
+		case "/api/s/default/stat/report/daily":
 			// Verify query parameters for time range
 			start := r.URL.Query().Get("start")
 			end := r.URL.Query().Get("end")
@@ -3067,11 +3075,11 @@ func TestClient_GetHourlyReport(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case r.URL.Path == "/api/s/default/stat/report/hourly":
+		case "/api/s/default/stat/report/hourly":
 			// Verify query parameters for time range
 			start := r.URL.Query().Get("start")
 			end := r.URL.Query().Get("end")
@@ -3147,11 +3155,11 @@ func TestClient_GetDailyReport_WithoutTimeRange(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case r.URL.Path == "/api/s/default/stat/report/daily":
+		case "/api/s/default/stat/report/daily":
 			// Verify no query parameters
 			if r.URL.Query().Get("start") != "" || r.URL.Query().Get("end") != "" {
 				t.Error("Daily report should not have time range parameters when not specified")
@@ -3190,11 +3198,11 @@ func TestClient_GetDeviceBandwidthStats_EmptyResponse(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case r.URL.Path == "/api/s/default/stat/device":
+		case "/api/s/default/stat/device":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:
@@ -3242,11 +3250,11 @@ func TestClient_GetClientBandwidthStats_EmptyResponse(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/auth/login":
+		switch r.URL.Path {
+		case "/api/auth/login":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"meta":{"rc":"ok"}}`))
-		case r.URL.Path == "/api/s/default/stat/sta":
+		case "/api/s/default/stat/sta":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(mockResponse)
 		default:

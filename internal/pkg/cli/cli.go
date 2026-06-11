@@ -18,7 +18,7 @@ import (
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/config"
 	"github.com/dl-alexandre/Local-UniFi-CLI/internal/pkg/output"
 	"github.com/dl-alexandre/cli-tools/version"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 )
 
 // CLI is the main command-line interface structure using Kong
@@ -336,8 +336,8 @@ func validateColorMode(mode string) error {
 
 func readPasswordSecure() string {
 	// Try to use terminal for secure password input
-	if terminal.IsTerminal(int(os.Stdin.Fd())) {
-		bytePassword, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err == nil {
 			fmt.Println()
 			return string(bytePassword)
@@ -4274,7 +4274,9 @@ func (c *BandwidthCmd) Run(g *Globals) error {
 func parseBytes(s string) float64 {
 	var val float64
 	var unit string
-	fmt.Sscanf(s, "%f %s", &val, &unit)
+	if n, err := fmt.Sscanf(s, "%f %s", &val, &unit); err != nil && n < 1 {
+		return 0
+	}
 
 	switch unit {
 	case "TB":
