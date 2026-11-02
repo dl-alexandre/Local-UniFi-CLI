@@ -3,7 +3,7 @@ module github.com/dl-alexandre/Local-UniFi-CLI
 go 1.26.0
 
 require (
-	github.com/alecthomas/kong v1.16.1
+	github.com/alecthomas/kong v1.17.0
 	github.com/dl-alexandre/cli-tools v0.0.1
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/mattn/go-isatty v0.0.24
